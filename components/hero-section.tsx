@@ -16,7 +16,7 @@ export function HeroSection() {
         </div>
 
         <h1 className="text-balance text-4xl font-bold leading-[1.1] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
-          Compare prediction market prices with clarity.
+          Same game. Different prices. Your edge.
         </h1>
         <p className="max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground sm:text-xl">
           Mandarin surfaces real price differences, guaranteed edges, and timing across US sportsbooks and prediction markets — updated live.

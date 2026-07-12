@@ -6,6 +6,7 @@ import { useTheme } from "next-themes"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { MandarinLogo } from "@/components/mandarin-logo"
+import { paymentsEnabled } from "@/lib/payments"
 
 export function Header() {
   const { resolvedTheme, setTheme } = useTheme()
@@ -29,9 +30,11 @@ export function Header() {
             <Link href="/arbitrage" className="text-sm font-medium transition-colors hover:text-orange-500">
               Dashboard
             </Link>
-            <Link href="/pricing" className="text-sm font-medium transition-colors hover:text-orange-500">
-              Pricing
-            </Link>
+            {paymentsEnabled && (
+              <Link href="/pricing" className="text-sm font-medium transition-colors hover:text-orange-500">
+                Pricing
+              </Link>
+            )}
           </nav>
         </div>
 
@@ -68,9 +71,11 @@ export function Header() {
           <Link href="/arbitrage" onClick={closeMenu} className="text-sm font-medium transition-colors hover:text-orange-500">
             Dashboard
           </Link>
-          <Link href="/pricing" onClick={closeMenu} className="text-sm font-medium transition-colors hover:text-orange-500">
-            Pricing
-          </Link>
+          {paymentsEnabled && (
+            <Link href="/pricing" onClick={closeMenu} className="text-sm font-medium transition-colors hover:text-orange-500">
+              Pricing
+            </Link>
+          )}
           <Button asChild className="w-full gap-2 bg-orange-500 text-white hover:bg-orange-600">
             <Link href="/sign-in" onClick={closeMenu}>
               Sign in <ArrowRight className="h-4 w-4" />

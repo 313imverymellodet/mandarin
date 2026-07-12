@@ -46,9 +46,13 @@ export async function fetchKalshiTicker(limit = 10): Promise<TickerMarketDTO[]> 
     // Keep only priced, single-outcome markets. The default listing mixes in
     // multivariate "combo" markets with null prices and comma-joined titles.
     .filter((m) => {
-      const priced = typeof m.last_price === "number" || typeof m.yes_bid === "number"
+      const price = m.last_price ?? m.yes_bid
+      // Priced, live question (not effectively resolved), clean single title,
+      // and still open.
+      const priced = typeof price === "number" && price > 2 && price < 98
       const cleanTitle = typeof m.title === "string" && !m.title.includes(",") && m.title.length <= 80
-      return priced && cleanTitle
+      const open = !m.close_time || new Date(m.close_time).getTime() > Date.now()
+      return priced && cleanTitle && open
     })
     .sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0))
     .slice(0, limit)

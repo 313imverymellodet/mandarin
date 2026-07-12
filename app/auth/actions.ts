@@ -45,12 +45,17 @@ export async function signUpWithPassword(formData: FormData): Promise<ActionResu
   })
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." }
 
+  const fullName = (formData.get("name") as string | null)?.trim() || undefined
+
   const supabase = await createClient()
   if (!supabase) return NOT_CONFIGURED
 
   const { data, error } = await supabase.auth.signUp({
     ...parsed.data,
-    options: { emailRedirectTo: `${config.site.url}/auth/callback` },
+    options: {
+      emailRedirectTo: `${config.site.url}/auth/callback`,
+      data: fullName ? { full_name: fullName } : undefined,
+    },
   })
   if (error) return { error: error.message }
 

@@ -53,33 +53,41 @@ export default async function AccountPage() {
           <CardHeader>
             <CardTitle className="flex items-center justify-between text-base">
               Plan
-              <Badge variant={active ? "default" : "secondary"} className={active ? "bg-orange-500 capitalize text-white" : "capitalize"}>
-                {planLabel}
+              <Badge
+                variant={active || !config.stripe.enabled ? "default" : "secondary"}
+                className={active || !config.stripe.enabled ? "bg-orange-500 capitalize text-white" : "capitalize"}
+              >
+                {config.stripe.enabled ? planLabel : "Full access"}
               </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
-            {active ? (
+            {!config.stripe.enabled ? (
               <p className="text-muted-foreground">
-                {subscription?.cancel_at_period_end
-                  ? "Your plan is set to cancel at the end of the current period."
-                  : "Your subscription is active."}
-                {subscription?.current_period_end &&
-                  ` Renews ${new Date(subscription.current_period_end).toLocaleDateString()}.`}
+                You have full access while Mandarin is in open beta — every feature is unlocked, no plan required.
               </p>
+            ) : active ? (
+              <>
+                <p className="text-muted-foreground">
+                  {subscription?.cancel_at_period_end
+                    ? "Your plan is set to cancel at the end of the current period."
+                    : "Your subscription is active."}
+                  {subscription?.current_period_end &&
+                    ` Renews ${new Date(subscription.current_period_end).toLocaleDateString()}.`}
+                </p>
+                <ManageBillingButton hasCustomer={Boolean(subscription?.stripe_customer_id)} />
+              </>
             ) : (
-              <p className="text-muted-foreground">
-                You&apos;re on the free plan.{" "}
-                <Link href="/pricing" className="text-orange-500 hover:text-orange-600">
-                  Upgrade for full access
-                </Link>
-                .
-              </p>
-            )}
-            {config.stripe.enabled ? (
-              <ManageBillingButton hasCustomer={Boolean(subscription?.stripe_customer_id)} />
-            ) : (
-              <p className="text-xs text-muted-foreground">Billing isn&apos;t configured on this deployment.</p>
+              <>
+                <p className="text-muted-foreground">
+                  You&apos;re on the free plan.{" "}
+                  <Link href="/pricing" className="text-orange-500 hover:text-orange-600">
+                    Upgrade for full access
+                  </Link>
+                  .
+                </p>
+                <ManageBillingButton hasCustomer={Boolean(subscription?.stripe_customer_id)} />
+              </>
             )}
           </CardContent>
         </Card>

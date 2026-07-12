@@ -24,6 +24,7 @@ export interface OddsUpdate {
     url: string
   }[]
   arbitrage: number
+  kind: "arbitrage" | "watch"
   riskLevel: "low" | "medium" | "high"
   eventTime: Date
   lastUpdated: Date
@@ -92,7 +93,8 @@ export function useOddsWebSocket(filter?: string) {
 
       const revived = data.opportunities.map(reviveOpportunity)
       const diffed = diffOpportunities(previousRef.current, revived)
-      const hasNew = diffed.some((o) => o.isNew) && previousRef.current.length > 0
+      // Chime only for genuinely new arbitrage — watch rows churn constantly.
+      const hasNew = diffed.some((o) => o.isNew && o.kind === "arbitrage") && previousRef.current.length > 0
 
       previousRef.current = revived
       setOpportunities(diffed)

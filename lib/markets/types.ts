@@ -23,8 +23,18 @@ export interface OpportunityDTO {
   league: string
   category: MarketCategory
   platforms: PlatformQuote[]
-  /** Guaranteed edge in percent: 100 - sum(implied probabilities). */
+  /**
+   * Edge in percent: 100 - sum(implied probabilities) across the best
+   * available line per outcome. Positive = guaranteed arbitrage; negative
+   * = how far the market is from an arb (shown on "watch" rows).
+   */
   arbitrage: number
+  /**
+   * "arbitrage" = backing every outcome locks in profit right now.
+   * "watch" = no guaranteed edge yet; shown so the board stays live and
+   * near-arbs are visible before they cross over.
+   */
+  kind: "arbitrage" | "watch"
   riskLevel: RiskLevel
   eventTime: string // ISO
   lastUpdated: string // ISO

@@ -46,7 +46,8 @@ export async function fetchPolymarketTicker(limit = 10): Promise<TickerMarketDTO
   const url = new URL(`${config.polymarket.baseUrl}/markets`)
   url.searchParams.set("closed", "false")
   url.searchParams.set("active", "true")
-  url.searchParams.set("limit", String(limit))
+  // Over-fetch: the quality gates below discard a large share of rows.
+  url.searchParams.set("limit", String(limit * 5))
   url.searchParams.set("order", "volume")
   url.searchParams.set("ascending", "false")
 
@@ -60,10 +61,20 @@ export async function fetchPolymarketTicker(limit = 10): Promise<TickerMarketDTO
   if (!Array.isArray(data)) return []
 
   const markets: TickerMarketDTO[] = []
+  const now = Date.now()
   for (const m of data) {
     if (markets.length >= limit) break
     const prices = parseJsonArray(m.outcomePrices)
     if (prices.length < 2) continue
+
+    // Quality gates: skip effectively-resolved markets (≤2¢ / ≥98¢ they're
+    // noise, not a live question), expired markets, and dead volume.
+    const yesPct = Number(prices[0]) * 100
+    if (!Number.isFinite(yesPct) || yesPct <= 2 || yesPct >= 98) continue
+    if (m.endDate && new Date(m.endDate).getTime() <= now) continue
+    const vol = typeof m.volume === "string" ? Number(m.volume) : (m.volume ?? 0)
+    if (!Number.isFinite(vol) || vol < 1000) continue
+
     markets.push({
       id: `polymarket-${m.id}`,
       title: m.question,

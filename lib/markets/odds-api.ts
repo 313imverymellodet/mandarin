@@ -1,5 +1,5 @@
 import { config } from "@/lib/config"
-import { findBestArbitrage, riskForEdge, decimalToImpliedPct, type OutcomeQuote } from "./arbitrage"
+import { findBestLines, riskForEdge, decimalToImpliedPct, type OutcomeQuote } from "./arbitrage"
 import type { MarketCategory, OpportunityDTO, PlatformQuote } from "./types"
 
 /**
@@ -67,8 +67,9 @@ function categoryForSport(sportKey: string): MarketCategory {
 }
 
 /**
- * Fetch h2h odds for one sport and return any positive-edge arbitrage
- * opportunities mapped to the app's canonical shape.
+ * Fetch h2h odds for one sport. Returns every upcoming event priced at the
+ * best available line per outcome: positive-edge events are flagged as
+ * "arbitrage", the rest as "watch" so the board always shows live markets.
  */
 async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
   const url = new URL(`${config.oddsApi.baseUrl}/sports/${sportKey}/odds`)
@@ -100,14 +101,15 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
       }
     }
 
-    const arb = findBestArbitrage(quotes)
-    if (!arb) continue
+    const lines = findBestLines(quotes)
+    if (!lines) continue
 
     const eventTime = new Date(event.commence_time)
     if (Number.isNaN(eventTime.getTime()) || eventTime.getTime() <= now) continue
     const hoursUntil = (eventTime.getTime() - now) / 3_600_000
 
-    const platforms: PlatformQuote[] = arb.legs.map((leg) => ({
+    const isArb = lines.edgePct > 0
+    const platforms: PlatformQuote[] = lines.legs.map((leg) => ({
       name: titleForBook(event, leg.bookmaker),
       odds: Math.round(decimalToImpliedPct(leg.decimal) * 10) / 10,
       decimal: leg.decimal,
@@ -120,8 +122,9 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
       league: leagueLabel(event.sport_key, event.sport_title),
       category: categoryForSport(event.sport_key),
       platforms,
-      arbitrage: arb.edgePct,
-      riskLevel: riskForEdge(arb.edgePct, hoursUntil),
+      arbitrage: lines.edgePct,
+      kind: isArb ? "arbitrage" : "watch",
+      riskLevel: isArb ? riskForEdge(lines.edgePct, hoursUntil) : "low",
       eventTime: eventTime.toISOString(),
       lastUpdated: new Date().toISOString(),
     })

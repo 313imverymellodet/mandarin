@@ -32,12 +32,13 @@ export interface ArbResult {
 
 /**
  * Given every bookmaker quote for a single event, pick the best (highest
- * decimal payout) quote per outcome and determine whether backing all
- * outcomes across those books yields a guaranteed profit.
+ * decimal payout) quote per outcome and compute the edge from backing all
+ * outcomes at those best prices.
  *
- * Returns null when the market is one-sided or no positive edge exists.
+ * The edge may be negative (normal, vigged market) — callers decide the
+ * threshold. Returns null only when the market is one-sided.
  */
-export function findBestArbitrage(quotes: OutcomeQuote[]): ArbResult | null {
+export function findBestLines(quotes: OutcomeQuote[]): ArbResult | null {
   if (quotes.length < 2) return null
 
   const bestByOutcome = new Map<string, OutcomeQuote>()
@@ -54,10 +55,13 @@ export function findBestArbitrage(quotes: OutcomeQuote[]): ArbResult | null {
   if (legs.length < 2) return null
 
   const impliedSum = legs.reduce((sum, leg) => sum + decimalToImpliedPct(leg.decimal), 0)
-  const edgePct = round2(100 - impliedSum)
-  if (edgePct <= 0) return null
+  return { legs, edgePct: round2(100 - impliedSum) }
+}
 
-  return { legs, edgePct }
+/** Best lines filtered to guaranteed-profit markets only. */
+export function findBestArbitrage(quotes: OutcomeQuote[]): ArbResult | null {
+  const result = findBestLines(quotes)
+  return result && result.edgePct > 0 ? result : null
 }
 
 /**

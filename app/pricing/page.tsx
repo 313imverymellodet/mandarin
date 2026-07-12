@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { MandarinLogo } from "@/components/mandarin-logo"
+import { paymentsEnabled } from "@/lib/payments"
 import { Check, ArrowLeft, Zap, Crown, Rocket } from "lucide-react"
 
 const plans = [
@@ -76,7 +77,8 @@ export default function PricingPage() {
 
   const handleSelect = async (planId: string | null) => {
     setError(null)
-    if (!planId) {
+    // Open-beta mode: no billing configured — everyone just signs up free.
+    if (!paymentsEnabled || !planId) {
       router.push("/sign-up")
       return
     }
@@ -123,21 +125,37 @@ export default function PricingPage() {
         <div className="text-center mb-12">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-500/10 rounded-full border border-orange-500/20 mb-4">
             <Zap className="h-3.5 w-3.5 text-orange-500" />
-            <span className="text-orange-600 dark:text-orange-400 text-sm font-medium">Simple pricing</span>
+            <span className="text-orange-600 dark:text-orange-400 text-sm font-medium">
+              {paymentsEnabled ? "Simple pricing" : "Free open beta"}
+            </span>
           </div>
           <h1 className="text-4xl sm:text-5xl font-bold mb-4 text-balance">
-            Choose the plan that fits your{" "}
-            <span className="bg-gradient-to-r from-orange-500 to-amber-500 bg-clip-text text-transparent">
-              trading style
-            </span>
+            {paymentsEnabled ? (
+              <>
+                Choose the plan that fits your{" "}
+                <span className="bg-gradient-to-r from-orange-500 to-amber-500 bg-clip-text text-transparent">
+                  trading style
+                </span>
+              </>
+            ) : (
+              <>
+                Everything&apos;s{" "}
+                <span className="bg-gradient-to-r from-orange-500 to-amber-500 bg-clip-text text-transparent">
+                  free
+                </span>{" "}
+                while we&apos;re in beta
+              </>
+            )}
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Start free and upgrade as you grow. All plans include our core arbitrage detection technology.
+            {paymentsEnabled
+              ? "Start free and upgrade as you grow. All plans include our core arbitrage detection technology."
+              : "Every feature below is unlocked for testers — no card, no charge. Just sign up and start finding edges."}
           </p>
         </div>
 
         {/* Billing toggle */}
-        <div className="flex items-center justify-center gap-4 mb-12">
+        <div className={`flex items-center justify-center gap-4 mb-12 ${paymentsEnabled ? "" : "hidden"}`}>
           <span className={billingPeriod === "monthly" ? "text-foreground" : "text-muted-foreground"}>Monthly</span>
           <button
             onClick={() => setBillingPeriod(billingPeriod === "monthly" ? "yearly" : "monthly")}
@@ -217,7 +235,7 @@ export default function PricingPage() {
                         : "bg-secondary hover:bg-secondary/80"
                     }`}
                   >
-                    {loadingPlan === plan.planId ? "Redirecting…" : plan.cta}
+                    {loadingPlan === plan.planId ? "Redirecting…" : paymentsEnabled ? plan.cta : "Get started free"}
                   </Button>
                 </CardContent>
               </Card>

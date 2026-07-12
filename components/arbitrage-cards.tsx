@@ -4,7 +4,7 @@ import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Copy, ExternalLink, Check, Sparkles } from "lucide-react"
+import { Copy, ExternalLink, Check, Sparkles, Radar } from "lucide-react"
 import { useOddsWebSocket, type OddsUpdate } from "@/hooks/use-odds-websocket"
 import { CountdownTimer } from "@/components/countdown-timer"
 import { RiskIndicator } from "@/components/risk-indicator"
@@ -27,6 +27,9 @@ const platformColors: Record<string, string> = {
   PointsBet: "bg-red-500",
   "William Hill (US)": "bg-teal-500",
   Bovada: "bg-rose-500",
+  "MyBookie.ag": "bg-indigo-500",
+  BetOnline: "bg-cyan-600",
+  "LowVig.ag": "bg-lime-600",
 }
 
 const leagueColors: Record<string, string> = {
@@ -37,21 +40,24 @@ const leagueColors: Record<string, string> = {
   CFB: "bg-green-700",
   NCAAB: "bg-orange-600",
   UFC: "bg-red-600",
+  MLS: "bg-purple-600",
   Soccer: "bg-purple-500",
   Politics: "bg-gray-700",
 }
 
 interface ArbitrageCardsProps {
-  filter?: string
   showStats?: boolean
+  /** Show league filter chips derived from the live feed. */
+  showFilters?: boolean
   limit?: number
 }
 
-export function ArbitrageCards({ filter, showStats = true, limit }: ArbitrageCardsProps) {
+export function ArbitrageCards({ showStats = true, showFilters = false, limit }: ArbitrageCardsProps) {
+  const [filter, setFilter] = useState("all")
   const {
     opportunities,
+    allOpportunities,
     sources,
-    degraded,
     isConnected,
     isLoading,
     error,
@@ -61,21 +67,48 @@ export function ArbitrageCards({ filter, showStats = true, limit }: ArbitrageCar
     setSoundEnabled,
   } = useOddsWebSocket(filter)
 
-  const avgArbitrage =
-    opportunities.length > 0 ? opportunities.reduce((sum, o) => sum + o.arbitrage, 0) / opportunities.length : 0
-  const visibleOpportunities = limit ? opportunities.slice(0, limit) : opportunities
+  // League chips come from what's actually live — never a hardcoded list.
+  const leagues = [...new Set(allOpportunities.map((o) => o.league))].sort()
+
+  const arbs = opportunities.filter((o) => o.kind === "arbitrage")
+  const watch = opportunities.filter((o) => o.kind === "watch")
+  const avgArbitrage = arbs.length > 0 ? arbs.reduce((sum, o) => sum + o.arbitrage, 0) / arbs.length : null
 
   const notConfigured = sources.find((s) => s.id === "odds-api" && !s.enabled)
   const sourceError = sources.find((s) => s.enabled && !s.ok)
 
+  // Compact mode (home page): one blended list, arbs first.
+  const visible = limit ? [...arbs, ...watch].slice(0, limit) : null
+
   return (
     <div className="space-y-4">
+      {showFilters && leagues.length > 1 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1" role="group" aria-label="Filter by league">
+          {["all", ...leagues].map((league) => (
+            <Button
+              key={league}
+              variant={filter === league ? "default" : "outline"}
+              size="sm"
+              onClick={() => setFilter(league)}
+              aria-pressed={filter === league}
+              className={`flex-shrink-0 ${
+                filter === league ? "bg-orange-500 hover:bg-orange-600 text-white" : "bg-transparent"
+              }`}
+            >
+              {league === "all" ? "All" : league}
+            </Button>
+          ))}
+        </div>
+      )}
+
       {showStats && (
-        <StatsBar totalOpportunities={opportunities.length} updateCount={updateCount} avgArbitrage={avgArbitrage} />
+        <StatsBar arbCount={arbs.length} watchCount={watch.length} avgArbitrage={avgArbitrage} updateCount={updateCount} />
       )}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-medium text-muted-foreground">Arbitrage opportunities ({opportunities.length})</h2>
+        <h2 className="text-sm font-medium text-muted-foreground">
+          {limit ? "Live markets" : `Arbitrage opportunities (${arbs.length})`}
+        </h2>
         <div className="flex items-center gap-2">
           <SoundToggle enabled={soundEnabled} onToggle={setSoundEnabled} />
           <ConnectionStatus isConnected={isConnected} lastUpdate={lastUpdate} />
@@ -83,7 +116,7 @@ export function ArbitrageCards({ filter, showStats = true, limit }: ArbitrageCar
       </div>
 
       {isLoading && opportunities.length === 0 ? (
-        <div className="space-y-4">
+        <div className="space-y-4" aria-hidden="true">
           {Array.from({ length: limit ?? 3 }).map((_, i) => (
             <Card key={i} className="h-40 animate-pulse bg-muted/40" />
           ))}
@@ -95,7 +128,7 @@ export function ArbitrageCards({ filter, showStats = true, limit }: ArbitrageCar
               <p className="text-muted-foreground">Live opportunities need a market data key.</p>
               <p className="text-sm text-muted-foreground mt-1">
                 Set <code className="rounded bg-muted px-1 py-0.5 text-xs">ODDS_API_KEY</code> to start streaming real
-                sportsbook arbitrage.
+                sportsbook odds.
               </p>
             </>
           ) : sourceError || error ? (
@@ -105,22 +138,51 @@ export function ArbitrageCards({ filter, showStats = true, limit }: ArbitrageCar
             </>
           ) : (
             <>
-              <p className="text-muted-foreground">No arbitrage right now for this filter.</p>
+              <p className="text-muted-foreground">No upcoming markets for this filter right now.</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Efficient markets rarely misprice — check back, or try &quot;All&quot;.
+                New games appear as books post lines — usually the night before.
               </p>
             </>
           )}
         </Card>
-      ) : (
+      ) : visible ? (
+        // Home page: compact blended list
         <div className="space-y-4">
-          {visibleOpportunities.map((opp) => (
+          {visible.map((opp) => (
             <ArbitrageCard key={opp.id} opportunity={opp} />
           ))}
-          {limit && opportunities.length > limit && (
-            <Button asChild variant="outline" className="w-full bg-transparent">
-              <Link href="/arbitrage">View all opportunities</Link>
-            </Button>
+          <Button asChild variant="outline" className="w-full bg-transparent">
+            <Link href="/arbitrage">View all live markets</Link>
+          </Button>
+        </div>
+      ) : (
+        // Dashboard: arbs section, then market watch
+        <div className="space-y-4">
+          {arbs.length === 0 ? (
+            <Card className="border-dashed p-6 text-center">
+              <p className="text-sm text-muted-foreground">
+                No guaranteed arbitrage at this moment — real cross-book edges are rare and brief.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                The markets below are being watched live; anything that crosses into profit jumps up here instantly.
+              </p>
+            </Card>
+          ) : (
+            arbs.map((opp) => <ArbitrageCard key={opp.id} opportunity={opp} />)
+          )}
+
+          {watch.length > 0 && (
+            <>
+              <div className="flex items-center gap-2 pt-4">
+                <Radar className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                <h2 className="text-sm font-medium text-muted-foreground">
+                  Market watch · best lines across books ({watch.length})
+                </h2>
+              </div>
+              {watch.map((opp) => (
+                <ArbitrageCard key={opp.id} opportunity={opp} />
+              ))}
+            </>
           )}
         </div>
       )}
@@ -130,9 +192,10 @@ export function ArbitrageCards({ filter, showStats = true, limit }: ArbitrageCar
 
 function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
   const [copied, setCopied] = useState(false)
+  const isArb = opportunity.kind === "arbitrage"
 
   const copyToClipboard = async () => {
-    const text = `${opportunity.matchup}\nArbitrage: +${opportunity.arbitrage.toFixed(2)}%\n${opportunity.platforms.map((p) => `${p.name}: ${p.odds}%`).join("\n")}`
+    const text = `${opportunity.matchup}\nEdge: ${opportunity.arbitrage >= 0 ? "+" : ""}${opportunity.arbitrage.toFixed(2)}%\n${opportunity.platforms.map((p) => `${p.name}: ${p.odds}%`).join("\n")}`
     await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -141,16 +204,16 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
   return (
     <Card
       className={`overflow-hidden transition-all hover:shadow-md hover:border-orange-500/30 relative ${
-        opportunity.isNew
+        isArb && opportunity.isNew
           ? "ring-2 ring-orange-500 animate-in fade-in slide-in-from-top-4 duration-500"
           : opportunity.justUpdated
-            ? "ring-1 ring-orange-500/50"
+            ? "ring-1 ring-orange-500/30"
             : ""
       }`}
     >
-      {opportunity.isNew && (
+      {isArb && opportunity.isNew && (
         <div className="absolute right-0 top-0 flex items-center gap-1 rounded-bl-lg bg-orange-500 px-2 py-0.5 text-xs font-bold text-white">
-          <Sparkles className="h-3 w-3" />
+          <Sparkles className="h-3 w-3" aria-hidden="true" />
           NEW
         </div>
       )}
@@ -164,20 +227,26 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
             >
               {opportunity.league}
             </Badge>
-            <RiskIndicator level={opportunity.riskLevel} />
+            {isArb ? (
+              <RiskIndicator level={opportunity.riskLevel} />
+            ) : (
+              <Badge variant="outline" className="text-xs text-muted-foreground">
+                Watching
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <CountdownTimer eventTime={opportunity.eventTime} />
             <button
               onClick={copyToClipboard}
               className="p-1.5 hover:bg-muted rounded-md transition-colors"
-              title={copied ? "Copied!" : "Copy opportunity details"}
-              aria-label={copied ? "Opportunity details copied" : "Copy opportunity details"}
+              title={copied ? "Copied!" : "Copy market details"}
+              aria-label={copied ? "Market details copied" : "Copy market details"}
             >
               {copied ? (
-                <Check className="h-4 w-4 text-orange-500" />
+                <Check className="h-4 w-4 text-orange-500" aria-hidden="true" />
               ) : (
-                <Copy className="h-4 w-4 text-muted-foreground" />
+                <Copy className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               )}
             </button>
           </div>
@@ -185,21 +254,24 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
 
         <h3 className="font-semibold text-sm sm:text-base mb-3 text-balance">{opportunity.matchup}</h3>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 text-sm mb-4">
-          <span className="text-muted-foreground flex items-center gap-1 text-xs sm:text-sm">
-            <span className="text-orange-500 font-medium">$</span> Market:{" "}
-            {opportunity.platforms.map((p) => p.name).join(" vs ")}
-          </span>
-          <Badge variant="outline" className="border-orange-500/30 text-xs text-orange-600 dark:text-orange-400">
-            {opportunity.platforms.length}-way
-          </Badge>
-        </div>
-
         <div className="flex items-center justify-between mb-3">
           <QuickActionButton platforms={opportunity.platforms} />
           <div className="text-right">
-            <span className="text-orange-500 font-bold text-lg sm:text-xl">+{opportunity.arbitrage.toFixed(2)}%</span>
-            <p className="text-xs text-muted-foreground">guaranteed edge</p>
+            {isArb ? (
+              <>
+                <span className="text-orange-500 font-bold text-lg sm:text-xl tabular-nums">
+                  +{opportunity.arbitrage.toFixed(2)}%
+                </span>
+                <p className="text-xs text-muted-foreground">guaranteed edge</p>
+              </>
+            ) : (
+              <>
+                <span className="text-muted-foreground font-semibold text-base sm:text-lg tabular-nums">
+                  {opportunity.arbitrage.toFixed(2)}%
+                </span>
+                <p className="text-xs text-muted-foreground">gap to arbitrage</p>
+              </>
+            )}
           </div>
         </div>
 
@@ -211,29 +283,34 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
                 platform.previousOdds && platform.odds !== platform.previousOdds ? "bg-orange-500/5" : ""
               }`}
             >
-              <div className="flex items-center gap-2">
-                <div className={`w-5 h-5 ${platformColors[platform.name] || "bg-gray-500"} rounded-md flex-shrink-0`} />
+              <div className="flex items-center gap-2 min-w-0">
+                <div
+                  className={`w-5 h-5 ${platformColors[platform.name] || "bg-gray-500"} rounded-md flex-shrink-0`}
+                  aria-hidden="true"
+                />
                 <a
                   href={platform.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs sm:text-sm font-medium flex items-center gap-1 hover:text-orange-500 transition-colors"
+                  className="text-xs sm:text-sm font-medium flex items-center gap-1 hover:text-orange-500 transition-colors truncate"
                 >
                   {platform.name}
-                  <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                  <ExternalLink className="h-3 w-3 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
                 </a>
               </div>
               <div className="flex items-center gap-1">
-                <span className="font-semibold text-sm sm:text-base">{platform.odds}%</span>
+                <span className="font-semibold text-sm sm:text-base tabular-nums">{platform.odds}%</span>
                 <OddsChangeIndicator currentOdds={platform.odds} previousOdds={platform.previousOdds} />
               </div>
             </div>
           ))}
         </div>
 
-        <div className="mt-4 pt-3 border-t border-border">
-          <ProfitCalculator arbitragePercent={opportunity.arbitrage} platforms={opportunity.platforms} />
-        </div>
+        {isArb && (
+          <div className="mt-4 pt-3 border-t border-border">
+            <ProfitCalculator arbitragePercent={opportunity.arbitrage} platforms={opportunity.platforms} />
+          </div>
+        )}
       </CardContent>
     </Card>
   )

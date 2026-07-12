@@ -90,7 +90,10 @@ function SignInForm() {
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
+                  spellCheck={false}
                   placeholder="you@example.com"
                   className="pl-10"
                   value={email}
@@ -111,7 +114,9 @@ function SignInForm() {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
                   placeholder="Enter your password"
                   className="pl-10 pr-10"
                   value={password}
@@ -121,9 +126,10 @@ function SignInForm() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
                 </button>
               </div>
             </div>
@@ -199,7 +205,7 @@ function SignInForm() {
           <MandarinLogo className="w-24 h-24 mx-auto mb-8" />
           <h2 className="text-3xl font-bold mb-4">Find arbitrage opportunities in seconds</h2>
           <p className="text-orange-100 text-lg">
-            Scan 50+ prediction markets and sportsbooks for guaranteed profit opportunities.
+            Live odds from US sportsbooks and prediction markets, scanned continuously for guaranteed edges.
           </p>
           <div className="mt-8 flex justify-center gap-8">
             <div>

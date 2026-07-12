@@ -113,8 +113,10 @@ export default function SignUpPage() {
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="name"
+                  name="name"
                   type="text"
-                  placeholder="John Doe"
+                  autoComplete="name"
+                  placeholder="Your name"
                   className="pl-10"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -129,7 +131,10 @@ export default function SignUpPage() {
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
+                  spellCheck={false}
                   placeholder="you@example.com"
                   className="pl-10"
                   value={email}
@@ -145,7 +150,9 @@ export default function SignUpPage() {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="password"
+                  name="password"
                   type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
                   placeholder="Create a password"
                   className="pl-10 pr-10"
                   value={password}
@@ -155,9 +162,10 @@ export default function SignUpPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
                 </button>
               </div>
               {password.length > 0 && (
@@ -270,7 +278,7 @@ export default function SignUpPage() {
           </p>
           <div className="space-y-4 text-left">
             {[
-              "Real-time arbitrage scanning across 50+ platforms",
+              "Real-time arbitrage scanning across US sportsbooks",
               "Instant alerts for new opportunities",
               "Detailed profit calculations",
               "Risk assessment for each trade",

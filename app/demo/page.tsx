@@ -5,6 +5,7 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { MandarinLogo } from "@/components/mandarin-logo"
+import { paymentsEnabled } from "@/lib/payments"
 import { ArrowLeft, Play, Pause, RotateCcw, TrendingUp, Zap, DollarSign, Clock } from "lucide-react"
 
 export default function DemoPage() {
@@ -203,11 +204,13 @@ export default function DemoPage() {
                   <Zap className="h-5 w-5" />
                 </Button>
               </Link>
-              <Link href="/pricing">
-                <Button variant="outline" className="px-8 py-6 text-lg bg-transparent">
-                  View Pricing
-                </Button>
-              </Link>
+              {paymentsEnabled && (
+                <Link href="/pricing">
+                  <Button variant="outline" className="px-8 py-6 text-lg bg-transparent">
+                    View Pricing
+                  </Button>
+                </Link>
+              )}
             </div>
           </div>
         </div>

@@ -35,16 +35,27 @@ export function CountdownTimer({ eventTime, compact = false }: CountdownTimerPro
 
   const isUrgent = timeLeft.total < 30 * 60 * 1000 // Less than 30 minutes
   const isWarning = timeLeft.total < 60 * 60 * 1000 // Less than 1 hour
+  // Beyond 48h a ticking clock is noise — show days instead.
+  const days = Math.floor(timeLeft.total / (24 * 60 * 60 * 1000))
+  const longRange = days >= 2
 
   if (compact) {
     return (
       <span
-        className={`text-xs font-mono ${
+        className={`text-xs font-mono tabular-nums ${
           isUrgent ? "text-red-500" : isWarning ? "text-amber-500" : "text-muted-foreground"
         }`}
       >
-        {timeLeft.hours > 0 && `${timeLeft.hours}h `}
-        {timeLeft.minutes}m {timeLeft.seconds}s
+        {longRange ? (
+          <>
+            {days}d {timeLeft.hours % 24}h
+          </>
+        ) : (
+          <>
+            {timeLeft.hours > 0 && `${timeLeft.hours}h `}
+            {timeLeft.minutes}m {timeLeft.seconds}s
+          </>
+        )}
       </span>
     )
   }
@@ -59,10 +70,18 @@ export function CountdownTimer({ eventTime, compact = false }: CountdownTimerPro
             : "bg-muted text-muted-foreground"
       }`}
     >
-      <Clock className="h-3 w-3" />
-      <span className="font-mono">
-        {timeLeft.hours > 0 && `${timeLeft.hours}:`}
-        {String(timeLeft.minutes).padStart(2, "0")}:{String(timeLeft.seconds).padStart(2, "0")}
+      <Clock className="h-3 w-3" aria-hidden="true" />
+      <span className="font-mono tabular-nums">
+        {longRange ? (
+          <>
+            {days}d {timeLeft.hours % 24}h
+          </>
+        ) : (
+          <>
+            {timeLeft.hours > 0 && `${timeLeft.hours}:`}
+            {String(timeLeft.minutes).padStart(2, "0")}:{String(timeLeft.seconds).padStart(2, "0")}
+          </>
+        )}
       </span>
     </div>
   )
