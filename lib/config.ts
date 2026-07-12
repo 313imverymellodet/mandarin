@@ -25,14 +25,6 @@ export const config = {
       return Boolean(this.key)
     },
   },
-  kalshi: {
-    baseUrl: env("KALSHI_BASE_URL") ?? "https://api.elections.kalshi.com/trade-api/v2",
-    enabled: env("DISABLE_KALSHI") !== "true",
-  },
-  polymarket: {
-    baseUrl: env("POLYMARKET_BASE_URL") ?? "https://gamma-api.polymarket.com",
-    enabled: env("DISABLE_POLYMARKET") !== "true",
-  },
   supabase: {
     url: env("NEXT_PUBLIC_SUPABASE_URL"),
     anonKey: env("NEXT_PUBLIC_SUPABASE_ANON_KEY"),

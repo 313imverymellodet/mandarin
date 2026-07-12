@@ -41,40 +41,39 @@ export function MarketTicker() {
   if (markets.length === 0) {
     return (
       <div className="border-b border-border bg-background px-4 py-3 text-center text-xs text-muted-foreground">
-        Live prediction-market prices appear here once Kalshi/Polymarket are reachable.
+        Live game odds appear here once books post lines for upcoming games.
       </div>
     )
   }
 
   return (
-    <section className="overflow-hidden border-b border-border bg-background" aria-label="Live market ticker">
+    <section className="overflow-hidden border-b border-border bg-background" aria-label="Live game odds ticker">
       <div className="border-b border-orange-500/15 bg-orange-500/5 px-4 py-1.5 text-center text-[11px] font-medium uppercase tracking-widest text-orange-600 dark:text-orange-400">
-        Live prices · Kalshi &amp; Polymarket
+        Live odds · US sportsbooks
       </div>
       <div className="flex animate-scroll hover:[animation-play-state:paused]">
         {[...markets, ...markets].map((market, index) => (
           <article
             key={`${market.id}-${index}`}
-            className="w-44 flex-shrink-0 border-r border-border px-4 py-2.5 transition-colors hover:bg-orange-500/5 sm:w-56 sm:px-6 sm:py-4"
+            className="w-48 flex-shrink-0 border-r border-border px-4 py-2.5 transition-colors hover:bg-orange-500/5 sm:w-56 sm:px-6 sm:py-4"
+            title={market.matchup}
           >
             <div className="mb-1.5 flex items-center justify-between gap-2 sm:mb-2">
               <Badge variant="outline" className="text-[10px] font-medium sm:text-xs">
-                {market.venue}
+                {market.league}
               </Badge>
               {market.eventTime && <CountdownTimer eventTime={new Date(market.eventTime)} compact />}
             </div>
-            <div className="mb-1 line-clamp-2 min-h-[2.5rem] text-sm font-medium leading-tight" title={market.title}>
-              {market.title}
+            <div className="space-y-1">
+              {market.sides.map((side, i) => (
+                <div key={i} className="flex items-center justify-between gap-2 text-xs sm:text-sm">
+                  <span className="truncate font-medium">{side.label}</span>
+                  <span className={`font-semibold tabular-nums ${i === 0 ? "text-orange-500" : "text-muted-foreground"}`}>
+                    {side.price}
+                  </span>
+                </div>
+              ))}
             </div>
-            <div className="flex gap-3 text-xs">
-              <span>
-                Yes <span className="font-semibold text-orange-500">{market.yes}</span>
-              </span>
-              <span>
-                No <span className="font-semibold text-muted-foreground">{market.no}</span>
-              </span>
-            </div>
-            {market.volume && <span className="mt-1 hidden text-xs text-muted-foreground sm:block">Vol: {market.volume}</span>}
           </article>
         ))}
       </div>

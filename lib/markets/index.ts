@@ -1,7 +1,5 @@
 import { config } from "@/lib/config"
 import { fetchOddsApiOpportunities } from "./odds-api"
-import { fetchKalshiTicker } from "./kalshi"
-import { fetchPolymarketTicker } from "./polymarket"
 import type {
   OpportunitiesResponse,
   OpportunityDTO,
@@ -78,38 +76,48 @@ export async function getOpportunities(): Promise<OpportunitiesResponse> {
   })
 }
 
+/**
+ * The ticker is derived from the same cached opportunities feed — no extra
+ * upstream calls — so it always mirrors the live sportsbook games on the
+ * dashboard (soonest first).
+ */
 export async function getTicker(): Promise<TickerResponse> {
-  return cached("ticker", config.cacheTtlMs, async () => {
-    const tasks: Promise<TickerMarketDTO[]>[] = []
-    if (config.kalshi.enabled) tasks.push(safe(fetchKalshiTicker(6)))
-    if (config.polymarket.enabled) tasks.push(safe(fetchPolymarketTicker(6)))
+  const { opportunities } = await getOpportunities()
 
-    const results = await Promise.all(tasks)
-    const markets = interleave(results).slice(0, 12)
-    return { markets, generatedAt: new Date().toISOString() }
-  })
-}
+  const markets: TickerMarketDTO[] = [...opportunities]
+    .sort((a, b) => new Date(a.eventTime).getTime() - new Date(b.eventTime).getTime())
+    .slice(0, 14)
+    .map((o) => ({
+      id: o.id,
+      matchup: o.matchup,
+      league: o.league,
+      sides: o.platforms.map((p) => ({
+        label: shortenTeam(p.outcome, o.league) ?? p.name,
+        price: `${Math.round(p.odds)}%`,
+      })),
+      eventTime: o.eventTime,
+    }))
 
-/** Round-robin merge so the ticker alternates venues instead of clumping. */
-function interleave(lists: TickerMarketDTO[][]): TickerMarketDTO[] {
-  const out: TickerMarketDTO[] = []
-  const max = Math.max(0, ...lists.map((l) => l.length))
-  for (let i = 0; i < max; i++) {
-    for (const list of lists) {
-      if (list[i]) out.push(list[i])
-    }
-  }
-  return out
-}
-
-async function safe<T>(promise: Promise<T[]>): Promise<T[]> {
-  try {
-    return await promise
-  } catch {
-    return []
-  }
+  return { markets, generatedAt: new Date().toISOString() }
 }
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Shorten to the mascot/last name for leagues where that reads cleanly
+ * ("Los Angeles Dodgers" -> "Dodgers", fighters -> surname). Soccer clubs
+ * end in FC/SC/CF, so keep their full name and let the UI truncate.
+ */
+function shortenTeam(name: string | undefined, league: string): string | undefined {
+  if (!name) return undefined
+  if (league === "MLS" || league === "Soccer" || league === "Draw") return name
+  const parts = name.trim().split(/\s+/)
+  if (parts.length <= 1) return name
+  if (name === "Draw") return name
+  const twoWordSuffix = ["Red Sox", "White Sox", "Blue Jays", "Trail Blazers", "Maple Leafs", "Golden Knights"]
+  const lastTwo = parts.slice(-2).join(" ")
+  if (twoWordSuffix.includes(lastTwo)) return lastTwo
+  return parts[parts.length - 1]
 }

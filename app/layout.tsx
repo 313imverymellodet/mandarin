@@ -11,7 +11,7 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "Mandarin — Live Sports Arbitrage",
   description:
-    "Real-time cross-book arbitrage across US sportsbooks and prediction markets. Find guaranteed edges the moment lines diverge.",
+    "Real-time cross-book arbitrage across US sportsbooks. Find guaranteed edges the moment lines diverge.",
 }
 
 export default function RootLayout({

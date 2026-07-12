@@ -205,7 +205,7 @@ function SignInForm() {
           <MandarinLogo className="w-24 h-24 mx-auto mb-8" />
           <h2 className="text-3xl font-bold mb-4">Find arbitrage opportunities in seconds</h2>
           <p className="text-orange-100 text-lg">
-            Live odds from US sportsbooks and prediction markets, scanned continuously for guaranteed edges.
+            Live odds from major US sportsbooks, scanned continuously for guaranteed edges.
           </p>
           <div className="mt-8 flex justify-center gap-8">
             <div>

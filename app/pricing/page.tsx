@@ -36,7 +36,7 @@ const plans = [
     description: "For serious arbitrage traders",
     features: [
       "Unlimited arbitrage alerts",
-      "All sports & prediction markets",
+      "All sports & sportsbooks",
       "Real-time odds updates",
       "Advanced profit calculator",
       "Sound & push notifications",

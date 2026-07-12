@@ -4,7 +4,7 @@ const steps = [
   {
     icon: ScanSearch,
     title: "We scan every book",
-    body: "Mandarin pulls live prices for the same game across US sportsbooks and prediction markets, refreshing continuously.",
+    body: "Mandarin pulls live prices for the same game across major US sportsbooks, refreshing continuously.",
   },
   {
     icon: GitCompareArrows,

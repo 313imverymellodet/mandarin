@@ -1,8 +1,8 @@
 # Mandarin
 
-Live cross-book **arbitrage** across US sportsbooks and prediction markets. Mandarin
-compares every bookmaker's price for an event and surfaces the two-sided edges where
-backing both outcomes locks in a guaranteed return.
+Live cross-book **arbitrage** across US sportsbooks. Mandarin compares every
+bookmaker's price for an event and surfaces the two-sided edges where backing both
+outcomes locks in a guaranteed return.
 
 > Informational only — not financial advice. Odds move fast; always verify both lines on
 > the venue before staking. Mandarin never places bets on your behalf.
@@ -13,7 +13,7 @@ backing both outcomes locks in a guaranteed return.
 - **Tailwind CSS v4** + Radix UI
 - **Supabase** — auth + subscription storage
 - **Stripe** — Checkout + billing portal
-- Market data: **The Odds API** (sportsbooks), **Kalshi** & **Polymarket** (prediction markets)
+- Market data: **The Odds API** (live US sportsbook odds; powers both the dashboard and ticker)
 
 ## How it works
 
@@ -41,7 +41,7 @@ npm run dev
 ### 1. Market data (The Odds API)
 1. Get a key at <https://the-odds-api.com> (free tier works for testing).
 2. Set `ODDS_API_KEY`. Tune `ODDS_API_SPORTS` / `ODDS_API_REGIONS` to control quota use.
-3. Kalshi and Polymarket need no key.
+3. Both the dashboard and the live ticker are served from this one cached source.
 
 ### 2. Auth (Supabase)
 1. Create a project at <https://supabase.com>.

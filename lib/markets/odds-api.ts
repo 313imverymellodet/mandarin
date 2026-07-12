@@ -111,6 +111,7 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
     const isArb = lines.edgePct > 0
     const platforms: PlatformQuote[] = lines.legs.map((leg) => ({
       name: titleForBook(event, leg.bookmaker),
+      outcome: leg.outcome,
       odds: Math.round(decimalToImpliedPct(leg.decimal) * 10) / 10,
       decimal: leg.decimal,
       url: bookUrl(leg.bookmaker),

@@ -9,6 +9,8 @@ export type RiskLevel = "low" | "medium" | "high"
 export interface PlatformQuote {
   /** Bookmaker / venue name, e.g. "DraftKings", "Kalshi". */
   name: string
+  /** The outcome/team this quote is for, e.g. "Los Angeles Dodgers". */
+  outcome?: string
   /** Implied probability for the chosen side, as a percentage (0-100). */
   odds: number
   /** The raw decimal odds we bought at (sportsbooks only), for the calculator. */
@@ -56,13 +58,19 @@ export interface OpportunitiesResponse {
   generatedAt: string
 }
 
+export interface TickerSide {
+  /** Team / outcome name. */
+  label: string
+  /** Best implied probability across books, formatted e.g. "45%". */
+  price: string
+}
+
 export interface TickerMarketDTO {
   id: string
-  title: string
-  venue: string
-  yes: string
-  no: string
-  volume?: string
+  /** "Away @ Home" — used for the title attribute / a11y. */
+  matchup: string
+  league: string
+  sides: TickerSide[]
   eventTime?: string
 }
 

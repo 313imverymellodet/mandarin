@@ -19,7 +19,7 @@ export function HeroSection() {
           Same game. Different prices. Your edge.
         </h1>
         <p className="max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground sm:text-xl">
-          Mandarin surfaces real price differences, guaranteed edges, and timing across US sportsbooks and prediction markets — updated live.
+          Mandarin surfaces real price differences, guaranteed edges, and timing across major US sportsbooks — updated live.
         </p>
       </div>
 
