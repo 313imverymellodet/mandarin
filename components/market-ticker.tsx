@@ -55,7 +55,7 @@ export function MarketTicker() {
         {[...markets, ...markets].map((market, index) => (
           <article
             key={`${market.id}-${index}`}
-            className="min-w-36 flex-shrink-0 border-r border-border px-4 py-2.5 transition-colors hover:bg-orange-500/5 sm:min-w-44 sm:px-6 sm:py-4"
+            className="w-44 flex-shrink-0 border-r border-border px-4 py-2.5 transition-colors hover:bg-orange-500/5 sm:w-56 sm:px-6 sm:py-4"
           >
             <div className="mb-1.5 flex items-center justify-between gap-2 sm:mb-2">
               <Badge variant="outline" className="text-[10px] font-medium sm:text-xs">
@@ -63,7 +63,7 @@ export function MarketTicker() {
               </Badge>
               {market.eventTime && <CountdownTimer eventTime={new Date(market.eventTime)} compact />}
             </div>
-            <div className="mb-1 line-clamp-1 max-w-40 text-sm font-medium" title={market.title}>
+            <div className="mb-1 line-clamp-2 min-h-[2.5rem] text-sm font-medium leading-tight" title={market.title}>
               {market.title}
             </div>
             <div className="flex gap-3 text-xs">

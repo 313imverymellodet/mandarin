@@ -14,7 +14,10 @@ import { OddsChangeIndicator } from "@/components/odds-change-indicator"
 import { ProfitCalculator } from "@/components/profit-calculator"
 import { StatsBar } from "@/components/stats-bar"
 import { SoundToggle } from "@/components/sound-toggle"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+
+/** Watch rows this close to a guaranteed edge get flagged as "Almost". */
+const NEAR_ARB_THRESHOLD = -0.5
 
 const platformColors: Record<string, string> = {
   Kalshi: "bg-green-500",
@@ -67,8 +70,28 @@ export function ArbitrageCards({ showStats = true, showFilters = false, limit }:
     setSoundEnabled,
   } = useOddsWebSocket(filter)
 
+  // Sync the league filter with the URL (shareable + survives reload).
+  useEffect(() => {
+    if (!showFilters) return
+    const param = new URLSearchParams(window.location.search).get("league")
+    if (param) setFilter(param)
+  }, [showFilters])
+
+  const selectFilter = (league: string) => {
+    setFilter(league)
+    if (!showFilters) return
+    const url = new URL(window.location.href)
+    if (league === "all") url.searchParams.delete("league")
+    else url.searchParams.set("league", league)
+    window.history.replaceState(null, "", url)
+  }
+
   // League chips come from what's actually live — never a hardcoded list.
   const leagues = [...new Set(allOpportunities.map((o) => o.league))].sort()
+  const leagueCounts = allOpportunities.reduce<Record<string, number>>((acc, o) => {
+    acc[o.league] = (acc[o.league] ?? 0) + 1
+    return acc
+  }, {})
 
   const arbs = opportunities.filter((o) => o.kind === "arbitrage")
   const watch = opportunities.filter((o) => o.kind === "watch")
@@ -84,20 +107,23 @@ export function ArbitrageCards({ showStats = true, showFilters = false, limit }:
     <div className="space-y-4">
       {showFilters && leagues.length > 1 && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1" role="group" aria-label="Filter by league">
-          {["all", ...leagues].map((league) => (
-            <Button
-              key={league}
-              variant={filter === league ? "default" : "outline"}
-              size="sm"
-              onClick={() => setFilter(league)}
-              aria-pressed={filter === league}
-              className={`flex-shrink-0 ${
-                filter === league ? "bg-orange-500 hover:bg-orange-600 text-white" : "bg-transparent"
-              }`}
-            >
-              {league === "all" ? "All" : league}
-            </Button>
-          ))}
+          {["all", ...leagues].map((league) => {
+            const count = league === "all" ? allOpportunities.length : (leagueCounts[league] ?? 0)
+            const active = filter === league
+            return (
+              <Button
+                key={league}
+                variant={active ? "default" : "outline"}
+                size="sm"
+                onClick={() => selectFilter(league)}
+                aria-pressed={active}
+                className={`flex-shrink-0 ${active ? "bg-orange-500 hover:bg-orange-600 text-white" : "bg-transparent"}`}
+              >
+                {league === "all" ? "All" : league}
+                <span className={`ml-1.5 tabular-nums ${active ? "text-white/70" : "text-muted-foreground"}`}>{count}</span>
+              </Button>
+            )
+          })}
         </div>
       )}
 
@@ -193,6 +219,7 @@ export function ArbitrageCards({ showStats = true, showFilters = false, limit }:
 function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
   const [copied, setCopied] = useState(false)
   const isArb = opportunity.kind === "arbitrage"
+  const nearArb = !isArb && opportunity.arbitrage >= NEAR_ARB_THRESHOLD
 
   const copyToClipboard = async () => {
     const text = `${opportunity.matchup}\nEdge: ${opportunity.arbitrage >= 0 ? "+" : ""}${opportunity.arbitrage.toFixed(2)}%\n${opportunity.platforms.map((p) => `${p.name}: ${p.odds}%`).join("\n")}`
@@ -206,9 +233,11 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
       className={`overflow-hidden transition-all hover:shadow-md hover:border-orange-500/30 relative ${
         isArb && opportunity.isNew
           ? "ring-2 ring-orange-500 animate-in fade-in slide-in-from-top-4 duration-500"
-          : opportunity.justUpdated
-            ? "ring-1 ring-orange-500/30"
-            : ""
+          : nearArb
+            ? "ring-1 ring-amber-500/60"
+            : opportunity.justUpdated
+              ? "ring-1 ring-orange-500/30"
+              : ""
       }`}
     >
       {isArb && opportunity.isNew && (
@@ -229,6 +258,10 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
             </Badge>
             {isArb ? (
               <RiskIndicator level={opportunity.riskLevel} />
+            ) : nearArb ? (
+              <Badge variant="outline" className="text-xs border-amber-500/50 text-amber-600 dark:text-amber-400">
+                Almost
+              </Badge>
             ) : (
               <Badge variant="outline" className="text-xs text-muted-foreground">
                 Watching
@@ -266,7 +299,11 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
               </>
             ) : (
               <>
-                <span className="text-muted-foreground font-semibold text-base sm:text-lg tabular-nums">
+                <span
+                  className={`font-semibold text-base sm:text-lg tabular-nums ${
+                    nearArb ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"
+                  }`}
+                >
                   {opportunity.arbitrage.toFixed(2)}%
                 </span>
                 <p className="text-xs text-muted-foreground">gap to arbitrage</p>

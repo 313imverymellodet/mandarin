@@ -140,7 +140,14 @@
 }
 
 .animate-scroll {
-  animation: scroll 25s linear infinite;
+  animation: scroll 40s linear infinite;
+}
+
+/* Faster once there's room; on small screens the slow pace keeps titles readable. */
+@media (min-width: 640px) {
+  .animate-scroll {
+    animation-duration: 30s;
+  }
 }
 
 .animate-scroll:hover {
