@@ -67,8 +67,11 @@ export function MarketScanner() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  const { opportunities, allOpportunities, isConnected, isLoading, lastUpdate, soundEnabled, setSoundEnabled } =
+  const { opportunities, allOpportunities, sources, isConnected, isLoading, error, lastUpdate, soundEnabled, setSoundEnabled } =
     useOddsWebSocket(filter)
+
+  const notConfigured = sources.find((s) => s.id === "odds-api" && !s.enabled)
+  const sourceError = sources.find((s) => s.enabled && !s.ok)
 
   // League filter chips + URL sync (shared with the Cards view via ?league=).
   useEffect(() => {
@@ -199,8 +202,28 @@ export function MarketScanner() {
       {isLoading && rows.length === 0 ? (
         <Card className="h-64 animate-pulse bg-muted/40" aria-hidden="true" />
       ) : rows.length === 0 ? (
-        <Card className="p-8 text-center text-sm text-muted-foreground">
-          No markets match this filter. Try &quot;All&quot;.
+        <Card className="p-8 text-center">
+          {notConfigured ? (
+            <>
+              <p className="text-sm text-muted-foreground">Live odds need a market data key.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Set <code className="rounded bg-muted px-1 py-0.5">ODDS_API_KEY</code> to start streaming odds.
+              </p>
+            </>
+          ) : sourceError || error ? (
+            <>
+              <p className="flex items-center justify-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-4 w-4" aria-hidden="true" /> Live odds provider is unavailable right now.
+              </p>
+              <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">{sourceError?.message ?? error}</p>
+            </>
+          ) : allOpportunities.length > 0 ? (
+            <p className="text-sm text-muted-foreground">No markets match this filter. Try &quot;All&quot;.</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No upcoming games have posted lines yet — check back closer to game day.
+            </p>
+          )}
         </Card>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border">

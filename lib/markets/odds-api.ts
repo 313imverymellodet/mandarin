@@ -81,6 +81,12 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
   const res = await fetch(url, { next: { revalidate: Math.floor(config.cacheTtlMs / 1000) } })
   if (!res.ok) {
     const body = await res.text().catch(() => "")
+    if (body.includes("OUT_OF_USAGE_CREDITS")) {
+      throw new Error("Odds provider monthly quota reached — live odds resume after the quota resets or you upgrade the plan.")
+    }
+    if (res.status === 401) {
+      throw new Error("Odds provider rejected the API key (401) — check ODDS_API_KEY.")
+    }
     throw new Error(`Odds API ${sportKey} responded ${res.status}: ${body.slice(0, 200)}`)
   }
   const events = (await res.json()) as OddsApiEvent[]
