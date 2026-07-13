@@ -14,9 +14,10 @@ export const config = {
   oddsApi: {
     key: env("ODDS_API_KEY"),
     baseUrl: env("ODDS_API_BASE_URL") ?? "https://api.the-odds-api.com/v4",
-    // Which sports to poll. Odds API charges per market/region, so keep this tight.
-    sports: (env("ODDS_API_SPORTS") ??
-      "americanfootball_nfl,basketball_nba,icehockey_nhl,americanfootball_ncaaf,mma_mixed_martial_arts,soccer_epl")
+    // Which sports to poll. Odds API charges per sport per refresh, so keep this
+    // tight and in-season. Override seasonally with ODDS_API_SPORTS. The default
+    // targets sports with games mid-year; off-season sports just return nothing.
+    sports: (env("ODDS_API_SPORTS") ?? "baseball_mlb,soccer_usa_mls,mma_mixed_martial_arts,basketball_wnba")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
