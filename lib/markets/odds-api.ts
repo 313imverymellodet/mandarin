@@ -78,7 +78,11 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
   url.searchParams.set("markets", "h2h")
   url.searchParams.set("oddsFormat", "decimal")
 
-  const res = await fetch(url, { next: { revalidate: Math.floor(config.cacheTtlMs / 1000) } })
+  // Always fetch fresh from upstream; our in-process cache (lib/markets/index.ts)
+  // is the single layer that controls refresh cadence. Relying on Next's fetch
+  // Data Cache here caused intermittent stale-empty responses (served [] while
+  // revalidating in the background).
+  const res = await fetch(url, { cache: "no-store" })
   if (!res.ok) {
     const body = await res.text().catch(() => "")
     if (body.includes("OUT_OF_USAGE_CREDITS")) {
