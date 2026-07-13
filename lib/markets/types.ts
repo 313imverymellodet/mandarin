@@ -15,6 +15,8 @@ export interface PlatformQuote {
   odds: number
   /** The raw decimal odds we bought at (sportsbooks only), for the calculator. */
   decimal?: number
+  /** ISO timestamp of when this book last moved the price (freshness). */
+  updatedAt?: string
   /** Direct link to the venue. */
   url: string
 }
@@ -37,6 +39,11 @@ export interface OpportunityDTO {
    * near-arbs are visible before they cross over.
    */
   kind: "arbitrage" | "watch"
+  /**
+   * True when the edge is implausibly large (see config.oddsApi.maxBelievableEdge)
+   * — almost always a stale line. Kept visible but flagged so you verify first.
+   */
+  suspect: boolean
   riskLevel: RiskLevel
   eventTime: string // ISO
   lastUpdated: string // ISO

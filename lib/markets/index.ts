@@ -57,12 +57,13 @@ export async function getOpportunities(): Promise<OpportunitiesResponse> {
       })
     }
 
-    // Arbs first (best edge on top), then watch rows closest to crossing
-    // into arbitrage. Cap watch rows so the payload stays lean.
+    // Clean arbs first (best edge on top), then suspect (too-large) arbs, then
+    // watch rows closest to crossing into arbitrage. Cap watch rows to stay lean.
     opportunities.sort((a, b) => b.arbitrage - a.arbitrage)
-    const arbs = opportunities.filter((o) => o.kind === "arbitrage")
+    const cleanArbs = opportunities.filter((o) => o.kind === "arbitrage" && !o.suspect)
+    const suspectArbs = opportunities.filter((o) => o.kind === "arbitrage" && o.suspect)
     const watch = opportunities.filter((o) => o.kind === "watch").slice(0, 24)
-    opportunities = [...arbs, ...watch]
+    opportunities = [...cleanArbs, ...suspectArbs, ...watch]
 
     const enabledSources = sources.filter((s) => s.enabled)
     const degraded = enabledSources.length > 0 && enabledSources.every((s) => !s.ok)

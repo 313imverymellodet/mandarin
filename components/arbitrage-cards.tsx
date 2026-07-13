@@ -4,7 +4,7 @@ import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Copy, ExternalLink, Check, Sparkles, Radar } from "lucide-react"
+import { Copy, ExternalLink, Check, Sparkles, Radar, AlertTriangle } from "lucide-react"
 import { useOddsWebSocket, type OddsUpdate } from "@/hooks/use-odds-websocket"
 import { CountdownTimer } from "@/components/countdown-timer"
 import { RiskIndicator } from "@/components/risk-indicator"
@@ -18,6 +18,17 @@ import { useEffect, useState } from "react"
 
 /** Watch rows this close to a guaranteed edge get flagged as "Almost". */
 const NEAR_ARB_THRESHOLD = -0.5
+
+/** Compact "how fresh is this price" label from an ISO timestamp. */
+function freshness(iso?: string): string | null {
+  if (!iso) return null
+  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (!Number.isFinite(secs) || secs < 0) return null
+  if (secs < 60) return "now"
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  return `${Math.floor(mins / 60)}h ago`
+}
 
 const platformColors: Record<string, string> = {
   Kalshi: "bg-green-500",
@@ -256,7 +267,12 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
             >
               {opportunity.league}
             </Badge>
-            {isArb ? (
+            {isArb && opportunity.suspect ? (
+              <Badge variant="outline" className="gap-1 text-xs border-red-500/50 text-red-600 dark:text-red-400">
+                <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                Verify
+              </Badge>
+            ) : isArb ? (
               <RiskIndicator level={opportunity.riskLevel} />
             ) : nearArb ? (
               <Badge variant="outline" className="text-xs border-amber-500/50 text-amber-600 dark:text-amber-400">
@@ -286,6 +302,13 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
         </div>
 
         <h3 className="font-semibold text-sm sm:text-base mb-3 text-balance">{opportunity.matchup}</h3>
+
+        {isArb && opportunity.suspect && (
+          <div className="mb-3 flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/5 p-2 text-xs text-red-600 dark:text-red-400">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+            <span>Edge is unusually large — almost always a stale or unbettable line. Confirm both prices on the books before staking.</span>
+          </div>
+        )}
 
         <div className="flex items-center justify-between mb-3">
           <QuickActionButton platforms={opportunity.platforms} />
@@ -335,7 +358,12 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
                   <ExternalLink className="h-3 w-3 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
                 </a>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-2">
+                {freshness(platform.updatedAt) && (
+                  <span className="hidden text-[11px] tabular-nums text-muted-foreground/70 sm:inline">
+                    {freshness(platform.updatedAt)}
+                  </span>
+                )}
                 <span className="font-semibold text-sm sm:text-base tabular-nums">{platform.odds}%</span>
                 <OddsChangeIndicator currentOdds={platform.odds} previousOdds={platform.previousOdds} />
               </div>

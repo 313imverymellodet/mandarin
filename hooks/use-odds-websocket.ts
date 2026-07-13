@@ -21,10 +21,12 @@ export interface OddsUpdate {
     odds: number
     previousOdds?: number
     decimal?: number
+    updatedAt?: string
     url: string
   }[]
   arbitrage: number
   kind: "arbitrage" | "watch"
+  suspect: boolean
   riskLevel: "low" | "medium" | "high"
   eventTime: Date
   lastUpdated: Date

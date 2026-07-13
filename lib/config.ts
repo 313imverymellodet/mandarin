@@ -21,6 +21,20 @@ export const config = {
       .map((s) => s.trim())
       .filter(Boolean),
     regions: env("ODDS_API_REGIONS") ?? "us",
+    // Only consider these bookmakers. For real-money use set this to the books
+    // YOU actually hold accounts with and can bet at in your state — that's what
+    // makes an arb actionable. Default excludes offshore books whose lines are
+    // often stale and unbettable (betonlineag, mybookieag, bovada, lowvig, betus).
+    books: (env("ODDS_API_BOOKS") ??
+      "draftkings,fanduel,betmgm,caesars,williamhill_us,betrivers,espnbet,fanatics,hardrockbet,ballybet,fliff")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+    // Drop any book quote older than this — a stale price is a phantom arb.
+    maxQuoteAgeMs: Number(env("ODDS_API_MAX_QUOTE_AGE_MS") ?? 8 * 60_000),
+    // Edges above this are almost always a stale/erroneous line, not money.
+    // They're kept but flagged "suspect" so you verify before trusting them.
+    maxBelievableEdge: Number(env("ODDS_API_MAX_EDGE") ?? 4.5),
     get enabled() {
       return Boolean(this.key)
     },

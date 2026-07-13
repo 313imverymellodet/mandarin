@@ -87,16 +87,23 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
   if (!Array.isArray(events)) return []
 
   const now = Date.now()
+  const allowedBooks = new Set(config.oddsApi.books)
+  const staleBefore = now - config.oddsApi.maxQuoteAgeMs
   const opportunities: OpportunityDTO[] = []
 
   for (const event of events) {
     const quotes: OutcomeQuote[] = []
     for (const book of event.bookmakers ?? []) {
+      // Only books you can actually bet at, and only fresh prices.
+      if (allowedBooks.size > 0 && !allowedBooks.has(book.key)) continue
+      const updatedAt = book.last_update ? new Date(book.last_update).getTime() : NaN
+      if (Number.isFinite(updatedAt) && updatedAt < staleBefore) continue
+
       const h2h = book.markets?.find((m) => m.key === "h2h")
       if (!h2h) continue
       for (const outcome of h2h.outcomes ?? []) {
         if (typeof outcome.price === "number") {
-          quotes.push({ outcome: outcome.name, bookmaker: book.key, decimal: outcome.price })
+          quotes.push({ outcome: outcome.name, bookmaker: book.key, decimal: outcome.price, lastUpdate: book.last_update })
         }
       }
     }
@@ -109,11 +116,13 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
     const hoursUntil = (eventTime.getTime() - now) / 3_600_000
 
     const isArb = lines.edgePct > 0
+    const suspect = isArb && lines.edgePct > config.oddsApi.maxBelievableEdge
     const platforms: PlatformQuote[] = lines.legs.map((leg) => ({
       name: titleForBook(event, leg.bookmaker),
       outcome: leg.outcome,
       odds: Math.round(decimalToImpliedPct(leg.decimal) * 10) / 10,
       decimal: leg.decimal,
+      updatedAt: leg.lastUpdate,
       url: bookUrl(leg.bookmaker),
     }))
 
@@ -125,6 +134,7 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
       platforms,
       arbitrage: lines.edgePct,
       kind: isArb ? "arbitrage" : "watch",
+      suspect,
       riskLevel: isArb ? riskForEdge(lines.edgePct, hoursUntil) : "low",
       eventTime: eventTime.toISOString(),
       lastUpdated: new Date().toISOString(),

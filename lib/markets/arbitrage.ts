@@ -21,6 +21,8 @@ export interface OutcomeQuote {
   outcome: string
   bookmaker: string
   decimal: number
+  /** ISO timestamp of when the book last updated this price. */
+  lastUpdate?: string
 }
 
 export interface ArbResult {
