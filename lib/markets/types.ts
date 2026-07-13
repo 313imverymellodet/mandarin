@@ -44,6 +44,11 @@ export interface OpportunityDTO {
    * — almost always a stale line. Kept visible but flagged so you verify first.
    */
   suspect: boolean
+  /** Change in edge (pp) over ~1h / ~6h; undefined until history accrues. */
+  edgeDelta1h?: number
+  edgeDelta6h?: number
+  /** Downsampled edge history (oldest→newest) for a sparkline. */
+  spark?: number[]
   riskLevel: RiskLevel
   eventTime: string // ISO
   lastUpdated: string // ISO

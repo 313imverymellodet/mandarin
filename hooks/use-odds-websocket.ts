@@ -28,6 +28,9 @@ export interface OddsUpdate {
   arbitrage: number
   kind: "arbitrage" | "watch"
   suspect: boolean
+  edgeDelta1h?: number
+  edgeDelta6h?: number
+  spark?: number[]
   riskLevel: "low" | "medium" | "high"
   eventTime: Date
   lastUpdated: Date

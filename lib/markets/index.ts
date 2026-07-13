@@ -1,5 +1,6 @@
 import { config } from "@/lib/config"
 import { fetchOddsApiOpportunities } from "./odds-api"
+import { getEdgeMovement, recordSnapshots } from "./history"
 import type {
   OpportunitiesResponse,
   OpportunityDTO,
@@ -64,6 +65,25 @@ export async function getOpportunities(): Promise<OpportunitiesResponse> {
     const suspectArbs = opportunities.filter((o) => o.kind === "arbitrage" && o.suspect)
     const watch = opportunities.filter((o) => o.kind === "watch").slice(0, 24)
     opportunities = [...cleanArbs, ...suspectArbs, ...watch]
+
+    // Enrich with historical edge movement, then record this refresh as the
+    // newest history point. Both are best-effort — never break the response.
+    if (config.supabase.serviceRoleKey && opportunities.length > 0) {
+      try {
+        const movement = await getEdgeMovement(opportunities.map((o) => o.id))
+        for (const o of opportunities) {
+          const m = movement.get(o.id)
+          if (m) {
+            o.edgeDelta1h = m.delta1h
+            o.edgeDelta6h = m.delta6h
+            o.spark = m.spark
+          }
+        }
+      } catch (error) {
+        console.error("edge movement lookup failed:", messageOf(error))
+      }
+      recordSnapshots(opportunities)
+    }
 
     const enabledSources = sources.filter((s) => s.enabled)
     const degraded = enabledSources.length > 0 && enabledSources.every((s) => !s.ok)

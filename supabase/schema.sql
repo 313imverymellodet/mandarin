@@ -48,7 +48,27 @@ create policy "Subscriptions are viewable by owner"
 create index if not exists subscriptions_customer_idx
   on public.subscriptions (stripe_customer_id);
 
--- 3. Auto-create a profile row when a new auth user signs up.
+-- 3. Odds history: a time series of the edge per market, written by the
+--    server (service role) each refresh. Powers line-movement + sparklines.
+--    Not user data — RLS on with no policies denies client access; the
+--    service role bypasses RLS.
+create table if not exists public.odds_snapshots (
+  id bigint generated always as identity primary key,
+  opportunity_id text not null,
+  league text,
+  matchup text,
+  edge double precision not null,
+  captured_at timestamptz not null default now()
+);
+
+create index if not exists odds_snapshots_lookup
+  on public.odds_snapshots (opportunity_id, captured_at desc);
+create index if not exists odds_snapshots_time
+  on public.odds_snapshots (captured_at);
+
+alter table public.odds_snapshots enable row level security;
+
+-- 4. Auto-create a profile row when a new auth user signs up.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql

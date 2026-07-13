@@ -9,8 +9,9 @@ import { CountdownTimer } from "@/components/countdown-timer"
 import { ProfitCalculator } from "@/components/profit-calculator"
 import { QuickActionButton } from "@/components/quick-action-button"
 import { SoundToggle } from "@/components/sound-toggle"
+import { Sparkline } from "@/components/sparkline"
 import { useOddsWebSocket, type OddsUpdate } from "@/hooks/use-odds-websocket"
-import { ArrowDown, ArrowUp, ChevronDown, ExternalLink, Flame, AlertTriangle } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronDown, ExternalLink, Flame, AlertTriangle, TrendingUp, TrendingDown } from "lucide-react"
 
 const leagueColors: Record<string, string> = {
   NFL: "bg-green-600",
@@ -36,7 +37,7 @@ const bookAbbr: Record<string, string> = {
   Fliff: "FLIFF",
 }
 
-type SortField = "edge" | "time"
+type SortField = "edge" | "time" | "move"
 type EdgeFilter = "all" | "near" | "arbs"
 
 function freshness(iso?: string): string | null {
@@ -105,6 +106,13 @@ export function MarketScanner() {
     const dir = sortDir === "desc" ? -1 : 1
     return [...list].sort((a, b) => {
       if (sortField === "edge") return (a.arbitrage - b.arbitrage) * dir
+      if (sortField === "move") {
+        // Markets without history sort to the bottom regardless of direction.
+        const av = a.edgeDelta1h ?? Number.NEGATIVE_INFINITY
+        const bv = b.edgeDelta1h ?? Number.NEGATIVE_INFINITY
+        if (av === bv) return 0
+        return (av - bv) * dir
+      }
       return (new Date(a.eventTime).getTime() - new Date(b.eventTime).getTime()) * dir
     })
   }, [opportunities, edgeFilter, sortField, sortDir])
@@ -206,6 +214,11 @@ export function MarketScanner() {
                     Edge <SortIcon field="edge" />
                   </button>
                 </th>
+                <th className="hidden px-3 py-2 font-medium lg:table-cell">
+                  <button onClick={() => toggleSort("move")} className="flex items-center gap-1 hover:text-foreground">
+                    Move 1h <SortIcon field="move" />
+                  </button>
+                </th>
                 <th className="hidden px-3 py-2 font-medium sm:table-cell">
                   <button onClick={() => toggleSort("time")} className="flex items-center gap-1 hover:text-foreground">
                     Starts <SortIcon field="time" />
@@ -272,6 +285,9 @@ function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolea
             {isArb ? (o.suspect ? "verify" : "arb") : "gap"}
           </div>
         </td>
+        <td className="hidden px-3 py-2.5 lg:table-cell">
+          <MoveCell o={o} />
+        </td>
         <td className="hidden px-3 py-2.5 sm:table-cell">
           <CountdownTimer eventTime={o.eventTime} compact />
         </td>
@@ -283,7 +299,7 @@ function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolea
 
       {expanded && (
         <tr className="border-b border-border bg-muted/20">
-          <td colSpan={6} className="px-3 py-4">
+          <td colSpan={7} className="px-3 py-4">
             <div className="space-y-3">
               {isArb && o.suspect && (
                 <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/5 p-2 text-xs text-red-600 dark:text-red-400">
@@ -325,6 +341,28 @@ function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolea
         </tr>
       )}
     </>
+  )
+}
+
+function MoveCell({ o }: { o: OddsUpdate }) {
+  const delta = o.edgeDelta1h
+  return (
+    <div className="flex items-center gap-2">
+      {o.spark && o.spark.length >= 2 ? <Sparkline data={o.spark} /> : <span className="text-xs text-muted-foreground/60">—</span>}
+      {delta !== undefined && delta !== 0 ? (
+        <span
+          className={`flex items-center gap-0.5 text-xs font-medium tabular-nums ${
+            delta > 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+          }`}
+        >
+          {delta > 0 ? <TrendingUp className="h-3 w-3" aria-hidden="true" /> : <TrendingDown className="h-3 w-3" aria-hidden="true" />}
+          {delta > 0 ? "+" : ""}
+          {delta.toFixed(2)}
+        </span>
+      ) : delta === 0 ? (
+        <span className="text-xs text-muted-foreground">flat</span>
+      ) : null}
+    </div>
   )
 }
 
