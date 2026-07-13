@@ -1,13 +1,32 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { MandarinLogo } from "@/components/mandarin-logo"
 import { ArbitrageCards } from "@/components/arbitrage-cards"
+import { MarketScanner } from "@/components/market-scanner"
 import { MarketTicker } from "@/components/market-ticker"
-import { ArrowLeft, User } from "lucide-react"
+import { ArrowLeft, User, LayoutGrid, Table2 } from "lucide-react"
+
+type View = "scanner" | "cards"
 
 export default function ArbitragePage() {
+  const [view, setView] = useState<View>("scanner")
+
+  useEffect(() => {
+    const param = new URLSearchParams(window.location.search).get("view")
+    if (param === "cards" || param === "scanner") setView(param)
+  }, [])
+
+  const selectView = (next: View) => {
+    setView(next)
+    const url = new URL(window.location.href)
+    if (next === "scanner") url.searchParams.delete("view")
+    else url.searchParams.set("view", next)
+    window.history.replaceState(null, "", url)
+  }
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -36,20 +55,45 @@ export default function ArbitragePage() {
 
       <main className="container mx-auto px-4 py-6">
         {/* Page header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold">Arbitrage Opportunities</h1>
-            <p className="text-muted-foreground text-sm">Live cross-book arbitrage across US sportsbooks</p>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold">Arbitrage Scanner</h1>
+            <p className="truncate text-sm text-muted-foreground">Live cross-book odds across US sportsbooks</p>
           </div>
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="gap-2">
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-              Home
-            </Button>
-          </Link>
+          <div className="flex flex-shrink-0 items-center gap-3">
+            {/* View toggle */}
+            <div className="flex items-center gap-0.5 rounded-lg border border-border bg-card p-0.5" role="group" aria-label="View mode">
+              <button
+                onClick={() => selectView("scanner")}
+                aria-pressed={view === "scanner"}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  view === "scanner" ? "bg-orange-500 text-white" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Table2 className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="hidden sm:inline">Scanner</span>
+              </button>
+              <button
+                onClick={() => selectView("cards")}
+                aria-pressed={view === "cards"}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  view === "cards" ? "bg-orange-500 text-white" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="hidden sm:inline">Cards</span>
+              </button>
+            </div>
+            <Link href="/" className="hidden sm:block">
+              <Button variant="ghost" size="sm" className="gap-2">
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                Home
+              </Button>
+            </Link>
+          </div>
         </div>
 
-        <ArbitrageCards showFilters />
+        {view === "scanner" ? <MarketScanner /> : <ArbitrageCards showFilters />}
       </main>
     </div>
   )

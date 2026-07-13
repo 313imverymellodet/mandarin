@@ -18,6 +18,7 @@ export interface OddsUpdate {
   category: "sports" | "politics" | "crypto" | "entertainment"
   platforms: {
     name: string
+    outcome?: string
     odds: number
     previousOdds?: number
     decimal?: number
