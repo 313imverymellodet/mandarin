@@ -58,13 +58,25 @@ export async function getOpportunities(): Promise<OpportunitiesResponse> {
       })
     }
 
-    // Clean arbs first (best edge on top), then suspect (too-large) arbs, then
-    // watch rows closest to crossing into arbitrage. Cap watch rows to stay lean.
-    opportunities.sort((a, b) => b.arbitrage - a.arbitrage)
-    const cleanArbs = opportunities.filter((o) => o.kind === "arbitrage" && !o.suspect)
-    const suspectArbs = opportunities.filter((o) => o.kind === "arbitrage" && o.suspect)
-    const watch = opportunities.filter((o) => o.kind === "watch").slice(0, 24)
-    opportunities = [...cleanArbs, ...suspectArbs, ...watch]
+    // Display priority: guaranteed arbitrage first, then estimated +EV (ranked
+    // by EV × confidence so a well-supported edge beats a low-confidence
+    // outlier), then suspect arbs, then watch rows closest to an arb. Watch is
+    // capped to stay lean; arbs and +EV are never capped away.
+    const evRank = (o: OpportunityDTO) => (o.edge ? o.edge.evPct * (o.edge.confidence / 100) : 0)
+    const cleanArbs = opportunities
+      .filter((o) => o.kind === "arbitrage" && !o.suspect)
+      .sort((a, b) => b.arbitrage - a.arbitrage)
+    const suspectArbs = opportunities
+      .filter((o) => o.kind === "arbitrage" && o.suspect)
+      .sort((a, b) => b.arbitrage - a.arbitrage)
+    const positiveEv = opportunities
+      .filter((o) => o.kind === "positive_ev")
+      .sort((a, b) => evRank(b) - evRank(a))
+    const watch = opportunities
+      .filter((o) => o.kind === "watch")
+      .sort((a, b) => b.arbitrage - a.arbitrage)
+      .slice(0, 24)
+    opportunities = [...cleanArbs, ...positiveEv, ...suspectArbs, ...watch]
 
     // Enrich with historical edge movement, then record this refresh as the
     // newest history point. Both are best-effort — never break the response.

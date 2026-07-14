@@ -11,7 +11,7 @@ import { QuickActionButton } from "@/components/quick-action-button"
 import { SoundToggle } from "@/components/sound-toggle"
 import { Sparkline } from "@/components/sparkline"
 import { useOddsWebSocket, type OddsUpdate } from "@/hooks/use-odds-websocket"
-import { ArrowDown, ArrowUp, ChevronDown, ExternalLink, Flame, AlertTriangle, TrendingUp, TrendingDown, Search, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronDown, ExternalLink, Flame, AlertTriangle, TrendingUp, TrendingDown, Search, X, Zap } from "lucide-react"
 
 const leagueColors: Record<string, string> = {
   NFL: "bg-green-600",
@@ -39,7 +39,20 @@ const bookAbbr: Record<string, string> = {
 }
 
 type SortField = "edge" | "time" | "move"
-type EdgeFilter = "all" | "near" | "arbs"
+type EdgeFilter = "all" | "arbs" | "ev" | "near"
+
+/** Decimal odds → American display, e.g. 2.10 → "+110", 1.80 → "-125". */
+function decimalToAmerican(decimal: number): string {
+  if (!Number.isFinite(decimal) || decimal <= 1) return ""
+  return decimal >= 2 ? `+${Math.round((decimal - 1) * 100)}` : `${Math.round(-100 / (decimal - 1))}`
+}
+
+/** Kind-aware ranking for the "edge" sort: arbitrage > +EV (ev×conf) > watch. */
+function edgeRank(o: OddsUpdate): number {
+  if (o.kind === "arbitrage") return 1_000_000 + o.arbitrage
+  if (o.kind === "positive_ev") return 1_000 + (o.edge ? (o.edge.evPct * o.edge.confidence) / 100 : 0)
+  return o.arbitrage // watch: negative gap-to-arb
+}
 
 function freshness(iso?: string): string | null {
   if (!iso) return null
@@ -122,13 +135,14 @@ export function MarketScanner() {
   const rows = useMemo(() => {
     let list = opportunities
     if (edgeFilter === "arbs") list = list.filter((o) => o.kind === "arbitrage")
-    else if (edgeFilter === "near") list = list.filter((o) => o.arbitrage >= -1)
+    else if (edgeFilter === "ev") list = list.filter((o) => o.kind === "positive_ev")
+    else if (edgeFilter === "near") list = list.filter((o) => o.kind !== "arbitrage" && o.arbitrage >= -1)
     const q = query.trim().toLowerCase()
     if (q) list = list.filter((o) => o.matchup.toLowerCase().includes(q) || o.league.toLowerCase().includes(q))
 
     const dir = sortDir === "desc" ? -1 : 1
     return [...list].sort((a, b) => {
-      if (sortField === "edge") return (a.arbitrage - b.arbitrage) * dir
+      if (sortField === "edge") return (edgeRank(a) - edgeRank(b)) * dir
       if (sortField === "move") {
         const av = a.edgeDelta1h ?? Number.NEGATIVE_INFINITY
         const bv = b.edgeDelta1h ?? Number.NEGATIVE_INFINITY
@@ -140,9 +154,11 @@ export function MarketScanner() {
   }, [opportunities, edgeFilter, query, sortField, sortDir])
 
   const arbs = allOpportunities.filter((o) => o.kind === "arbitrage")
-  const nearCount = allOpportunities.filter((o) => o.kind !== "arbitrage" && o.arbitrage >= -1).length
+  const evPlays = allOpportunities.filter((o) => o.kind === "positive_ev")
+  const bestEv = evPlays.length > 0 ? Math.max(...evPlays.map((o) => o.edge?.evPct ?? 0)) : null
   const bestEdge = allOpportunities.length > 0 ? Math.max(...allOpportunities.map((o) => o.arbitrage)) : null
-  const hot = [...opportunities].sort((a, b) => b.arbitrage - a.arbitrage).slice(0, 3)
+  // Prioritise showing the hottest actionable signal: arbs, then +EV, then closest gap.
+  const hot = [...opportunities].sort((a, b) => edgeRank(b) - edgeRank(a)).slice(0, 3)
 
   const SortIcon = ({ field }: { field: SortField }) =>
     sortField === field ? (
@@ -156,15 +172,20 @@ export function MarketScanner() {
   return (
     <div className="space-y-4">
       {/* Market overview */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         <StatTile label="Live markets" value={String(allOpportunities.length)} />
         <StatTile label="Arbitrage" value={String(arbs.length)} accent={arbs.length > 0 ? "green" : undefined} />
+        <StatTile label="+EV plays" value={String(evPlays.length)} accent={evPlays.length > 0 ? "green" : undefined} />
         <StatTile
-          label="Best edge"
+          label="Best +EV"
+          value={bestEv === null ? "—" : `+${bestEv.toFixed(2)}%`}
+          accent={bestEv !== null ? "green" : undefined}
+        />
+        <StatTile
+          label="Best arb gap"
           value={bestEdge === null ? "—" : `${bestEdge >= 0 ? "+" : ""}${bestEdge.toFixed(2)}%`}
           accent={bestEdge !== null && bestEdge > 0 ? "green" : bestEdge !== null && bestEdge >= -0.5 ? "amber" : undefined}
         />
-        <StatTile label="Near arb (<1%)" value={String(nearCount)} accent={nearCount > 0 ? "amber" : undefined} />
       </div>
 
       {/* League filters */}
@@ -203,7 +224,7 @@ export function MarketScanner() {
               className="flex flex-shrink-0 items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs transition-colors hover:border-orange-500/50"
             >
               <span className="max-w-32 truncate font-medium">{o.matchup}</span>
-              <span className={`font-semibold tabular-nums ${edgeColor(o)}`}>{fmtEdge(o.arbitrage)}</span>
+              <span className={`font-semibold tabular-nums ${edgeColor(o)}`}>{headlineValue(o)}</span>
             </button>
           ))}
         </div>
@@ -233,7 +254,7 @@ export function MarketScanner() {
             )}
           </div>
           <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-0.5 text-xs">
-            {(["all", "near", "arbs"] as EdgeFilter[]).map((f) => (
+            {(["all", "arbs", "ev", "near"] as EdgeFilter[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setEdgeFilter(f)}
@@ -242,7 +263,7 @@ export function MarketScanner() {
                   edgeFilter === f ? "bg-orange-500 text-white" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {f === "all" ? "All" : f === "near" ? "Near (<1%)" : "Arbs only"}
+                {f === "all" ? "All" : f === "arbs" ? "Arbs" : f === "ev" ? "+EV" : "Near (<1%)"}
               </button>
             ))}
           </div>
@@ -364,6 +385,7 @@ function SkeletonTable() {
 
 function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolean; onToggle: () => void }) {
   const isArb = o.kind === "arbitrage"
+  const isEv = o.kind === "positive_ev"
   const age = oldestFreshness(o)
 
   return (
@@ -379,7 +401,10 @@ function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolea
             <span className={`h-2 w-2 flex-shrink-0 rounded-full ${leagueColors[o.league] || "bg-gray-500"}`} aria-hidden="true" />
             <div className="min-w-0">
               <div className="truncate font-medium">{o.matchup}</div>
-              <div className="text-xs text-muted-foreground">{o.league}</div>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span>{o.league}</span>
+                <KindChip o={o} />
+              </div>
             </div>
           </div>
         </td>
@@ -394,17 +419,33 @@ function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolea
           </div>
         </td>
         <td className="px-3 py-2.5">
-          <div className={`flex items-center gap-1 font-semibold tabular-nums ${edgeColor(o)}`}>
-            {fmtEdge(o.arbitrage)}
-            {isArb && o.suspect && <AlertTriangle className="h-3 w-3" aria-hidden="true" />}
-          </div>
-          {/* distance-to-arb bar */}
-          <div className="mt-1 h-1 w-16 overflow-hidden rounded-full bg-muted">
-            <div
-              className={`h-full rounded-full ${isArb ? (o.suspect ? "bg-red-500" : "bg-green-500") : o.arbitrage >= -0.5 ? "bg-amber-500" : "bg-muted-foreground/40"}`}
-              style={{ width: `${proximityPct(o.arbitrage)}%` }}
-            />
-          </div>
+          {isEv && o.edge ? (
+            <>
+              <div className={`flex items-center gap-1 font-semibold tabular-nums ${edgeColor(o)}`}>
+                +{o.edge.evPct.toFixed(2)}%
+              </div>
+              <div className="text-[11px] text-muted-foreground">EV · {o.edge.confidence}/100</div>
+              {/* confidence bar */}
+              <div className="mt-1 h-1 w-16 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${o.edge.confidence}%` }} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={`flex items-center gap-1 font-semibold tabular-nums ${edgeColor(o)}`}>
+                {fmtEdge(o.arbitrage)}
+                {isArb && o.suspect && <AlertTriangle className="h-3 w-3" aria-hidden="true" />}
+              </div>
+              <div className="text-[11px] text-muted-foreground">{isArb ? (o.suspect ? "verify" : "arb") : "gap"}</div>
+              {/* distance-to-arb bar */}
+              <div className="mt-1 h-1 w-16 overflow-hidden rounded-full bg-muted">
+                <div
+                  className={`h-full rounded-full ${isArb ? (o.suspect ? "bg-red-500" : "bg-green-500") : o.arbitrage >= -0.5 ? "bg-amber-500" : "bg-muted-foreground/40"}`}
+                  style={{ width: `${proximityPct(o.arbitrage)}%` }}
+                />
+              </div>
+            </>
+          )}
         </td>
         <td className="hidden px-3 py-2.5 lg:table-cell">
           <MoveCell o={o} />
@@ -422,6 +463,38 @@ function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolea
         <tr className="border-b border-border bg-muted/20">
           <td colSpan={7} className="px-3 py-4">
             <div className="space-y-3">
+              {o.edge && (
+                <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                      <Zap className="h-4 w-4" aria-hidden="true" /> +{o.edge.evPct.toFixed(2)}% EV
+                    </span>
+                    <span className="text-xs text-muted-foreground">Confidence {o.edge.confidence}/100</span>
+                  </div>
+                  <p className="mt-1.5 text-sm font-medium">
+                    {o.edge.bookmaker} · {o.edge.outcome}{" "}
+                    <span className="tabular-nums text-muted-foreground">{decimalToAmerican(o.edge.decimal)}</span>
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-3">
+                    <span>
+                      Fair prob: <span className="tabular-nums text-foreground">{o.edge.fairProbabilityPct.toFixed(1)}%</span>
+                    </span>
+                    <span>
+                      ¼ Kelly: <span className="tabular-nums text-foreground">{o.edge.kellyStakePct.toFixed(2)}% bankroll</span>
+                    </span>
+                    <span>
+                      Fair value:{" "}
+                      <span className="text-foreground">
+                        {o.edge.anchorSource === "sharp" ? (o.edge.anchorBookmaker ?? "Sharp book") : "Consensus"}
+                      </span>
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Estimated long-run edge — not guaranteed on any single bet. Confidence is a data-quality score, not a win
+                    probability. Verify the line before staking.
+                  </p>
+                </div>
+              )}
               {isArb && o.suspect && (
                 <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/5 p-2 text-xs text-red-600 dark:text-red-400">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
@@ -491,8 +564,33 @@ function fmtEdge(edge: number): string {
   return `${edge >= 0 ? "+" : ""}${edge.toFixed(2)}%`
 }
 
+/** Headline figure for hot strip: EV% for +EV rows, arb/gap otherwise. */
+function headlineValue(o: OddsUpdate): string {
+  if (o.kind === "positive_ev" && o.edge) return `+${o.edge.evPct.toFixed(2)}% EV`
+  return fmtEdge(o.arbitrage)
+}
+
 function edgeColor(o: OddsUpdate): string {
   if (o.kind === "arbitrage") return o.suspect ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
+  if (o.kind === "positive_ev") return "text-emerald-600 dark:text-emerald-400"
   if (o.arbitrage >= -0.5) return "text-amber-600 dark:text-amber-400"
   return "text-muted-foreground"
+}
+
+function KindChip({ o }: { o: OddsUpdate }) {
+  if (o.kind === "arbitrage") {
+    return o.suspect ? (
+      <span className="rounded bg-red-500/15 px-1 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400">VERIFY</span>
+    ) : (
+      <span className="rounded bg-green-500/15 px-1 py-0.5 text-[10px] font-semibold text-green-600 dark:text-green-400">ARB</span>
+    )
+  }
+  if (o.kind === "positive_ev") {
+    return (
+      <span className="rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+        +EV
+      </span>
+    )
+  }
+  return null
 }

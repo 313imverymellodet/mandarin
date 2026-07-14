@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import type { OpportunitiesResponse, OpportunityDTO, SourceStatus } from "@/lib/markets/types"
+import type { EdgeDTO, OpportunitiesResponse, OpportunityDTO, SourceStatus } from "@/lib/markets/types"
 
 /**
  * Live opportunities feed. Polls the server aggregation endpoint (which is
@@ -26,7 +26,8 @@ export interface OddsUpdate {
     url: string
   }[]
   arbitrage: number
-  kind: "arbitrage" | "watch"
+  kind: "arbitrage" | "positive_ev" | "watch"
+  edge?: EdgeDTO
   suspect: boolean
   edgeDelta1h?: number
   edgeDelta6h?: number

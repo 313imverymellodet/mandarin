@@ -1,6 +1,7 @@
 import { config } from "@/lib/config"
 import { findBestLines, riskForEdge, decimalToImpliedPct, type OutcomeQuote } from "./arbitrage"
-import type { MarketCategory, OpportunityDTO, PlatformQuote } from "./types"
+import { analyzePositiveEV } from "./edge"
+import type { EdgeDTO, MarketCategory, OpportunityDTO, PlatformQuote } from "./types"
 
 /**
  * The Odds API (https://the-odds-api.com) aggregates decimal prices from
@@ -74,7 +75,9 @@ function categoryForSport(sportKey: string): MarketCategory {
 async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
   const url = new URL(`${config.oddsApi.baseUrl}/sports/${sportKey}/odds`)
   url.searchParams.set("apiKey", config.oddsApi.key!)
-  url.searchParams.set("regions", config.oddsApi.regions)
+  // Request the sharp anchor (Pinnacle) + eligible US books by exact key. ≤10
+  // books keeps this a single quota unit — same cost as one region.
+  url.searchParams.set("bookmakers", config.oddsApi.requestBookmakers.join(","))
   url.searchParams.set("markets", "h2h")
   url.searchParams.set("oddsFormat", "decimal")
 
@@ -97,15 +100,18 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
   if (!Array.isArray(events)) return []
 
   const now = Date.now()
-  const allowedBooks = new Set(config.oddsApi.books)
+  // One deterministic timestamp per API response, captured outside the loop.
+  const asOf = new Date(now).toISOString()
+  const usBooks = new Set(config.oddsApi.books)
   const staleBefore = now - config.oddsApi.maxQuoteAgeMs
   const opportunities: OpportunityDTO[] = []
 
   for (const event of events) {
-    const quotes: OutcomeQuote[] = []
+    // Fresh quotes from every requested book, INCLUDING the sharp anchor
+    // (Pinnacle). Stale prices — including a stale anchor — are dropped here so
+    // they can never produce a high-confidence phantom edge.
+    const anchorQuotes: OutcomeQuote[] = []
     for (const book of event.bookmakers ?? []) {
-      // Only books you can actually bet at, and only fresh prices.
-      if (allowedBooks.size > 0 && !allowedBooks.has(book.key)) continue
       const updatedAt = book.last_update ? new Date(book.last_update).getTime() : NaN
       if (Number.isFinite(updatedAt) && updatedAt < staleBefore) continue
 
@@ -113,20 +119,58 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
       if (!h2h) continue
       for (const outcome of h2h.outcomes ?? []) {
         if (typeof outcome.price === "number") {
-          quotes.push({ outcome: outcome.name, bookmaker: book.key, decimal: outcome.price, lastUpdate: book.last_update })
+          anchorQuotes.push({
+            outcome: outcome.name,
+            bookmaker: book.key.toLowerCase(),
+            decimal: outcome.price,
+            lastUpdate: book.last_update,
+          })
         }
       }
     }
 
-    const lines = findBestLines(quotes)
+    // Actionable US-book quotes drive existing arbitrage + the displayed lines.
+    const usQuotes = anchorQuotes.filter((q) => usBooks.has(q.bookmaker))
+
+    const lines = findBestLines(usQuotes)
     if (!lines) continue
 
     const eventTime = new Date(event.commence_time)
     if (Number.isNaN(eventTime.getTime()) || eventTime.getTime() <= now) continue
     const hoursUntil = (eventTime.getTime() - now) / 3_600_000
 
+    // +EV: de-vig a sharp (or consensus) anchor and compare eligible US books
+    // against fair value. Pinnacle anchors but is never an eligible bet target.
+    const edgeBest =
+      analyzePositiveEV(anchorQuotes, {
+        sharpBookmakers: config.oddsApi.sharpBooks,
+        minConsensusBooks: config.oddsApi.edge.minConsensusBooks,
+        eligibleBookmakers: config.oddsApi.books,
+        minimumEv: config.oddsApi.edge.minimumEv,
+        kellyFraction: config.oddsApi.edge.kellyFraction,
+        targetBookCount: config.oddsApi.edge.targetBookCount,
+        agreementStdevCeiling: config.oddsApi.edge.agreementStdevCeiling,
+        eventTime: event.commence_time,
+        asOf,
+      })?.best ?? null
+
     const isArb = lines.edgePct > 0
-    const suspect = isArb && lines.edgePct > config.oddsApi.maxBelievableEdge
+    const kind: OpportunityDTO["kind"] = isArb ? "arbitrage" : edgeBest ? "positive_ev" : "watch"
+
+    // Arbitrage keeps priority; +EV is displayed and retained but never labeled
+    // as guaranteed profit.
+    const suspect =
+      (isArb && lines.edgePct > config.oddsApi.maxBelievableEdge) ||
+      (kind === "positive_ev" && edgeBest !== null && edgeBest.confidence < 55)
+
+    const riskLevel: OpportunityDTO["riskLevel"] = isArb
+      ? riskForEdge(lines.edgePct, hoursUntil)
+      : edgeBest
+        ? edgeBest.confidence >= 70
+          ? "medium"
+          : "high"
+        : "low"
+
     const platforms: PlatformQuote[] = lines.legs.map((leg) => ({
       name: titleForBook(event, leg.bookmaker),
       outcome: leg.outcome,
@@ -136,6 +180,25 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
       url: bookUrl(leg.bookmaker),
     }))
 
+    const edge: EdgeDTO | undefined = edgeBest
+      ? {
+          market: "h2h",
+          outcome: edgeBest.outcome,
+          bookmaker: titleForBook(event, edgeBest.bookmaker),
+          decimal: edgeBest.decimal,
+          fairProbability: edgeBest.fairProbability,
+          fairProbabilityPct: Math.round(edgeBest.fairProbabilityPct * 10) / 10,
+          evPct: Math.round(edgeBest.evPct * 100) / 100,
+          kellyStakeFraction: edgeBest.kellyStakeFraction,
+          kellyStakePct: Math.round(edgeBest.kellyStakePct * 100) / 100,
+          confidence: edgeBest.confidence,
+          anchorSource: edgeBest.anchorSource,
+          ...(edgeBest.anchorBookmaker ? { anchorBookmaker: titleForBook(event, edgeBest.anchorBookmaker) } : {}),
+          booksQuoting: edgeBest.booksQuoting,
+          ...(edgeBest.lastUpdate ? { updatedAt: edgeBest.lastUpdate } : {}),
+        }
+      : undefined
+
     opportunities.push({
       id: `oddsapi-${event.id}`,
       matchup: `${event.away_team} @ ${event.home_team}`,
@@ -143,11 +206,12 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
       category: categoryForSport(event.sport_key),
       platforms,
       arbitrage: lines.edgePct,
-      kind: isArb ? "arbitrage" : "watch",
+      kind,
+      ...(edge ? { edge } : {}),
       suspect,
-      riskLevel: isArb ? riskForEdge(lines.edgePct, hoursUntil) : "low",
+      riskLevel,
       eventTime: eventTime.toISOString(),
-      lastUpdated: new Date().toISOString(),
+      lastUpdated: asOf,
     })
   }
 

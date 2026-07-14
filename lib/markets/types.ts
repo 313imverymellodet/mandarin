@@ -21,6 +21,32 @@ export interface PlatformQuote {
   url: string
 }
 
+/**
+ * A de-vigged positive-EV opportunity: a single book pricing one outcome
+ * better than the sharp/consensus fair value. Estimated long-run edge — NOT
+ * guaranteed profit like an arbitrage.
+ */
+export interface EdgeDTO {
+  market: "h2h" | "spreads" | "totals"
+  outcome: string
+  /** Bookmaker to place the bet at (display name, e.g. "DraftKings"). */
+  bookmaker: string
+  decimal: number
+  /** Canonical 0..1 fair probability. */
+  fairProbability: number
+  /** UI-ready percentages. */
+  fairProbabilityPct: number
+  evPct: number
+  kellyStakeFraction: number
+  kellyStakePct: number
+  /** 0..100 confidence — depth/agreement/anchor/timing. NOT a win probability. */
+  confidence: number
+  anchorSource: "sharp" | "consensus"
+  anchorBookmaker?: string
+  booksQuoting: number
+  updatedAt?: string
+}
+
 export interface OpportunityDTO {
   id: string
   matchup: string
@@ -30,15 +56,18 @@ export interface OpportunityDTO {
   /**
    * Edge in percent: 100 - sum(implied probabilities) across the best
    * available line per outcome. Positive = guaranteed arbitrage; negative
-   * = how far the market is from an arb (shown on "watch" rows).
+   * = how far the market is from an arb (shown on "watch"/"positive_ev" rows).
    */
   arbitrage: number
   /**
    * "arbitrage" = backing every outcome locks in profit right now.
+   * "positive_ev" = a single book beats fair value (estimated long-run edge).
    * "watch" = no guaranteed edge yet; shown so the board stays live and
    * near-arbs are visible before they cross over.
    */
-  kind: "arbitrage" | "watch"
+  kind: "arbitrage" | "positive_ev" | "watch"
+  /** Present on positive_ev rows (and optionally alongside an arb). */
+  edge?: EdgeDTO
   /**
    * True when the edge is implausibly large (see config.oddsApi.maxBelievableEdge)
    * — almost always a stale line. Kept visible but flagged so you verify first.

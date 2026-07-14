@@ -6,7 +6,9 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "npx --yes tsx lib/markets/edge.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
