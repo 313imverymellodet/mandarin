@@ -34,6 +34,7 @@ const bookAbbr: Record<string, string> = {
   BetRivers: "BR",
   "ESPN BET": "ESPN",
   Fanatics: "FAN",
+  "Hard Rock Bet": "HRB",
   Ballybet: "BALLY",
   Fliff: "FLIFF",
 }

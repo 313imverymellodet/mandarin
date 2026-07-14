@@ -49,18 +49,31 @@ const BOOK_URLS: Record<string, string> = {
   fanduel: "https://sportsbook.fanduel.com",
   betmgm: "https://sports.betmgm.com",
   caesars: "https://www.caesars.com/sportsbook",
-  betrivers: "https://betrivers.com",
+  williamhill_us: "https://www.caesars.com/sportsbook", // William Hill US rebranded to Caesars
+  betrivers: "https://www.betrivers.com",
+  espnbet: "https://espnbet.com",
+  fanatics: "https://sportsbook.fanatics.com",
+  hardrockbet: "https://app.hardrock.bet",
+  ballybet: "https://play.ballybet.com",
+  fliff: "https://www.getfliff.com",
   pointsbetus: "https://pointsbet.com",
-  williamhill_us: "https://www.williamhill.com",
+  pinnacle: "https://www.pinnacle.com",
   bovada: "https://www.bovada.lv",
+}
+
+/** Display-name overrides where the Odds API label is stale/confusing for US users. */
+const BOOK_TITLES: Record<string, string> = {
+  espnbet: "ESPN BET", // Odds API labels this "theScore Bet" (a CA-only brand)
+  williamhill_us: "Caesars",
 }
 
 function leagueLabel(sportKey: string, fallback: string): string {
   return LEAGUE_LABELS[sportKey] ?? fallback ?? sportKey
 }
 
+/** Homepage for a book. Falls back to a web search so a link never dead-ends. */
 function bookUrl(key: string): string {
-  return BOOK_URLS[key] ?? "https://the-odds-api.com"
+  return BOOK_URLS[key.toLowerCase()] ?? `https://www.google.com/search?q=${encodeURIComponent(`${key} sportsbook`)}`
 }
 
 function categoryForSport(sportKey: string): MarketCategory {
@@ -219,7 +232,9 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
 }
 
 function titleForBook(event: OddsApiEvent, bookKey: string): string {
-  const book = event.bookmakers?.find((b) => b.key === bookKey)
+  const key = bookKey.toLowerCase()
+  if (BOOK_TITLES[key]) return BOOK_TITLES[key]
+  const book = event.bookmakers?.find((b) => b.key.toLowerCase() === key)
   return book?.title ?? bookKey
 }
 
