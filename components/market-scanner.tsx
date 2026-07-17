@@ -6,12 +6,27 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { ConnectionStatus } from "@/components/connection-status"
 import { CountdownTimer } from "@/components/countdown-timer"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ProfitCalculator } from "@/components/profit-calculator"
 import { QuickActionButton } from "@/components/quick-action-button"
 import { SoundToggle } from "@/components/sound-toggle"
 import { Sparkline } from "@/components/sparkline"
+import { OnboardingPanel } from "@/components/onboarding-panel"
 import { useOddsWebSocket, type OddsUpdate } from "@/hooks/use-odds-websocket"
-import { ArrowDown, ArrowUp, ChevronDown, ExternalLink, Flame, AlertTriangle, TrendingUp, TrendingDown, Search, X, Zap } from "lucide-react"
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ExternalLink,
+  Flame,
+  AlertTriangle,
+  TrendingUp,
+  TrendingDown,
+  Search,
+  X,
+  Zap,
+  HelpCircle,
+} from "lucide-react"
 
 const leagueColors: Record<string, string> = {
   NFL: "bg-green-600",
@@ -172,6 +187,8 @@ export function MarketScanner() {
 
   return (
     <div className="space-y-4">
+      <OnboardingPanel />
+
       {/* Market overview */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         <StatTile label="Live markets" value={String(allOpportunities.length)} />
@@ -312,14 +329,26 @@ export function MarketScanner() {
                 <th className="px-3 py-2.5 font-medium">Game</th>
                 <th className="px-3 py-2.5 font-medium">Best lines</th>
                 <th className="px-3 py-2.5 font-medium">
-                  <button onClick={() => toggleSort("edge")} className="flex items-center gap-1 hover:text-foreground">
-                    Edge <SortIcon field="edge" />
-                  </button>
+                  <span className="flex items-center gap-1">
+                    <button onClick={() => toggleSort("edge")} className="flex items-center gap-1 hover:text-foreground">
+                      Edge <SortIcon field="edge" />
+                    </button>
+                    <HelpTip label="Edge">
+                      <strong>+EV%</strong> = expected return per $1 over many bets (green). <strong>ARB%</strong> = profit
+                      locked in right now. A negative <strong>gap</strong> = how far the market still is from an arb.
+                    </HelpTip>
+                  </span>
                 </th>
                 <th className="hidden px-3 py-2.5 font-medium lg:table-cell">
-                  <button onClick={() => toggleSort("move")} className="flex items-center gap-1 hover:text-foreground">
-                    Move 1h <SortIcon field="move" />
-                  </button>
+                  <span className="flex items-center gap-1">
+                    <button onClick={() => toggleSort("move")} className="flex items-center gap-1 hover:text-foreground">
+                      Move 1h <SortIcon field="move" />
+                    </button>
+                    <HelpTip label="Move 1h">
+                      How the edge shifted in the last hour. Green means it&apos;s moving toward a live arbitrage. Builds up as
+                      history accrues.
+                    </HelpTip>
+                  </span>
                 </th>
                 <th className="hidden px-3 py-2.5 font-medium sm:table-cell">
                   <button onClick={() => toggleSort("time")} className="flex items-center gap-1 hover:text-foreground">
@@ -348,6 +377,27 @@ export function MarketScanner() {
         Showing {rows.length} of {allOpportunities.length} markets · odds can change between refresh and placement — verify before you stake.
       </p>
     </div>
+  )
+}
+
+/** Small "what's this?" affordance for the board's jargon. */
+function HelpTip({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={`What is ${label}?`}
+            onClick={(e) => e.stopPropagation()}
+            className="text-muted-foreground/60 transition-colors hover:text-foreground"
+          >
+            <HelpCircle className="h-3 w-3" aria-hidden="true" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-60 text-xs leading-relaxed">{children}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
@@ -469,25 +519,46 @@ function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolea
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
                       <Zap className="h-4 w-4" aria-hidden="true" /> +{o.edge.evPct.toFixed(2)}% EV
+                      <HelpTip label="EV">
+                        Expected return per dollar across many identical bets. +5% EV ≈ $105 back per $100 on average — not on
+                        this one bet.
+                      </HelpTip>
                     </span>
-                    <span className="text-xs text-muted-foreground">Confidence {o.edge.confidence}/100</span>
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      Confidence {o.edge.confidence}/100
+                      <HelpTip label="Confidence">
+                        A <strong>data-quality</strong> score — book depth, agreement, sharp anchor, timing. It is{" "}
+                        <strong>not</strong> the chance this bet wins.
+                      </HelpTip>
+                    </span>
                   </div>
                   <p className="mt-1.5 text-sm font-medium">
                     {o.edge.bookmaker} · {o.edge.outcome}{" "}
                     <span className="tabular-nums text-muted-foreground">{decimalToAmerican(o.edge.decimal)}</span>
                   </p>
                   <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-3">
-                    <span>
+                    <span className="flex items-center gap-1">
                       Fair prob: <span className="tabular-nums text-foreground">{o.edge.fairProbabilityPct.toFixed(1)}%</span>
+                      <HelpTip label="Fair probability">
+                        The true chance of this outcome once the book&apos;s fee (the vig) is stripped out of the sharp line.
+                      </HelpTip>
                     </span>
-                    <span>
+                    <span className="flex items-center gap-1">
                       ¼ Kelly: <span className="tabular-nums text-foreground">{o.edge.kellyStakePct.toFixed(2)}% bankroll</span>
+                      <HelpTip label="Quarter Kelly">
+                        A staking guide. Full Kelly is growth-optimal but wildly swingy, so we suggest a quarter of it, as a %
+                        of your bankroll.
+                      </HelpTip>
                     </span>
-                    <span>
+                    <span className="flex items-center gap-1">
                       Fair value:{" "}
                       <span className="text-foreground">
                         {o.edge.anchorSource === "sharp" ? (o.edge.anchorBookmaker ?? "Sharp book") : "Consensus"}
                       </span>
+                      <HelpTip label="Fair value">
+                        Whose line defined the true odds. Pinnacle is the sharp book pros bet into; Consensus blends 3+ books
+                        when Pinnacle isn&apos;t available.
+                      </HelpTip>
                     </span>
                   </div>
                   <p className="mt-2 text-[11px] text-muted-foreground">

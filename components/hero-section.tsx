@@ -39,7 +39,7 @@ export function HeroSection() {
           </Link>
         </Button>
         <Button asChild size="lg" variant="outline" className="gap-2 bg-transparent px-8 text-base hover:border-orange-500/50 hover:bg-orange-500/10">
-          <Link href="/demo">
+          <Link href="/how-it-works">
             How it works <ArrowRight className="h-5 w-5" />
           </Link>
         </Button>

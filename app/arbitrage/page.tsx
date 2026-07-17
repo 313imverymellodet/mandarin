@@ -7,7 +7,7 @@ import { MandarinLogo } from "@/components/mandarin-logo"
 import { ArbitrageCards } from "@/components/arbitrage-cards"
 import { MarketScanner } from "@/components/market-scanner"
 import { MarketTicker } from "@/components/market-ticker"
-import { ArrowLeft, User, LayoutGrid, Table2 } from "lucide-react"
+import { ArrowLeft, User, LayoutGrid, Table2, HelpCircle } from "lucide-react"
 
 type View = "scanner" | "cards"
 
@@ -42,11 +42,19 @@ export default function ArbitragePage() {
               <span className="text-xs text-orange-600 dark:text-orange-400 font-medium">Live odds</span>
             </div>
           </div>
-          <Link href="/account">
-            <Button variant="ghost" size="icon" aria-label="Open account page">
-              <User className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link href="/how-it-works">
+              <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground">
+                <HelpCircle className="h-4 w-4" aria-hidden="true" />
+                <span className="hidden sm:inline">How it works</span>
+              </Button>
+            </Link>
+            <Link href="/account">
+              <Button variant="ghost" size="icon" aria-label="Open account page">
+                <User className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </Link>
+          </div>
         </div>
       </header>
 
