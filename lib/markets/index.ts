@@ -62,7 +62,7 @@ export async function getOpportunities(): Promise<OpportunitiesResponse> {
     // by EV × confidence so a well-supported edge beats a low-confidence
     // outlier), then suspect arbs, then watch rows closest to an arb. Watch is
     // capped to stay lean; arbs and +EV are never capped away.
-    const evRank = (o: OpportunityDTO) => (o.edge ? o.edge.evPct * (o.edge.confidence / 100) : 0)
+    const evRank = (o: OpportunityDTO) => (o.edge ? o.edge.netEvPct * (o.edge.confidence / 100) : 0)
     const cleanArbs = opportunities
       .filter((o) => o.kind === "arbitrage" && !o.suspect)
       .sort((a, b) => b.arbitrage - a.arbitrage)

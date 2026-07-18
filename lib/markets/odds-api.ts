@@ -1,6 +1,6 @@
 import { config } from "@/lib/config"
 import { findBestLines, riskForEdge, decimalToImpliedPct, type OutcomeQuote } from "./arbitrage"
-import { analyzePositiveEV } from "./edge"
+import { analyzePositiveEV, type EdgeOpportunity } from "./edge"
 import type { EdgeDTO, MarketCategory, OpportunityDTO, PlatformQuote } from "./types"
 
 /**
@@ -152,34 +152,44 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
     if (Number.isNaN(eventTime.getTime()) || eventTime.getTime() <= now) continue
     const hoursUntil = (eventTime.getTime() - now) / 3_600_000
 
-    // +EV: de-vig a sharp (or consensus) anchor and compare eligible US books
-    // against fair value. Pinnacle anchors but is never an eligible bet target.
-    const edgeBest =
-      analyzePositiveEV(anchorQuotes, {
-        sharpBookmakers: config.oddsApi.sharpBooks,
-        minConsensusBooks: config.oddsApi.edge.minConsensusBooks,
-        eligibleBookmakers: config.oddsApi.books,
-        minimumEv: config.oddsApi.edge.minimumEv,
-        kellyFraction: config.oddsApi.edge.kellyFraction,
-        targetBookCount: config.oddsApi.edge.targetBookCount,
-        agreementStdevCeiling: config.oddsApi.edge.agreementStdevCeiling,
-        eventTime: event.commence_time,
-        asOf,
-      })?.best ?? null
+    // Edge Engine V2 (+EV): leave-one-book-out sharp/consensus anchor, Power
+    // de-vig, uncertainty-adjusted net EV, conservative capped Kelly. Pinnacle
+    // anchors fair value but is never an eligible bet target. Flag-gated:
+    // disabled → skip entirely; each target is judged by an anchor that
+    // excludes itself, so a book can never move its own benchmark.
+    const v2 = config.oddsApi.v2
+    const edgeBest: EdgeOpportunity | null = v2.enabled
+      ? (analyzePositiveEV(anchorQuotes, {
+          riskProfile: v2.defaultProfile,
+          sharpBookmakers: config.oddsApi.sharpBooks,
+          eligibleBookmakers: config.oddsApi.books,
+          devigMethod: "power",
+          excludeTargetBookFromAnchor: true,
+          requireQuoteTimestamps: v2.requireTimestamps,
+          minConsensusBooks: config.oddsApi.edge.minConsensusBooks,
+          targetBookCount: config.oddsApi.edge.targetBookCount,
+          agreementStdevCeiling: config.oddsApi.edge.agreementStdevCeiling,
+          eventTime: event.commence_time,
+          asOf,
+        })?.best ?? null)
+      : null
+
+    // Shadow mode computes V2 but withholds it from the public feed.
+    const surfacedEdge = v2.enabled && !v2.shadowMode ? edgeBest : null
 
     const isArb = lines.edgePct > 0
-    const kind: OpportunityDTO["kind"] = isArb ? "arbitrage" : edgeBest ? "positive_ev" : "watch"
+    const kind: OpportunityDTO["kind"] = isArb ? "arbitrage" : surfacedEdge ? "positive_ev" : "watch"
 
     // Arbitrage keeps priority; +EV is displayed and retained but never labeled
     // as guaranteed profit.
     const suspect =
       (isArb && lines.edgePct > config.oddsApi.maxBelievableEdge) ||
-      (kind === "positive_ev" && edgeBest !== null && edgeBest.confidence < 55)
+      (kind === "positive_ev" && surfacedEdge !== null && surfacedEdge.confidence < 55)
 
     const riskLevel: OpportunityDTO["riskLevel"] = isArb
       ? riskForEdge(lines.edgePct, hoursUntil)
-      : edgeBest
-        ? edgeBest.confidence >= 70
+      : surfacedEdge
+        ? surfacedEdge.confidence >= 70
           ? "medium"
           : "high"
         : "low"
@@ -193,22 +203,30 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
       url: bookUrl(leg.bookmaker),
     }))
 
-    const edge: EdgeDTO | undefined = edgeBest
+    const round2 = (n: number) => Math.round(n * 100) / 100
+    const edge: EdgeDTO | undefined = surfacedEdge
       ? {
+          version: 2,
+          profile: v2.defaultProfile,
           market: "h2h",
-          outcome: edgeBest.outcome,
-          bookmaker: titleForBook(event, edgeBest.bookmaker),
-          decimal: edgeBest.decimal,
-          fairProbability: edgeBest.fairProbability,
-          fairProbabilityPct: Math.round(edgeBest.fairProbabilityPct * 10) / 10,
-          evPct: Math.round(edgeBest.evPct * 100) / 100,
-          kellyStakeFraction: edgeBest.kellyStakeFraction,
-          kellyStakePct: Math.round(edgeBest.kellyStakePct * 100) / 100,
-          confidence: edgeBest.confidence,
-          anchorSource: edgeBest.anchorSource,
-          ...(edgeBest.anchorBookmaker ? { anchorBookmaker: titleForBook(event, edgeBest.anchorBookmaker) } : {}),
-          booksQuoting: edgeBest.booksQuoting,
-          ...(edgeBest.lastUpdate ? { updatedAt: edgeBest.lastUpdate } : {}),
+          outcome: surfacedEdge.outcome,
+          bookmaker: titleForBook(event, surfacedEdge.bookmaker),
+          decimal: surfacedEdge.decimal,
+          fairDecimal: round2(surfacedEdge.fairDecimal),
+          fairProbability: surfacedEdge.fairProbability,
+          conservativeFairProbability: surfacedEdge.conservativeFairProbability,
+          probabilitySigma: surfacedEdge.probabilitySigma,
+          rawEvPct: round2(surfacedEdge.evPct),
+          conservativeEvPct: round2(surfacedEdge.conservativeEvPct),
+          netEvPct: round2(surfacedEdge.netEvPct),
+          confidence: surfacedEdge.confidence,
+          kellyStakeFraction: surfacedEdge.kellyStakeFraction,
+          anchorSource: surfacedEdge.anchorSource,
+          anchorMode: surfacedEdge.anchorMode,
+          anchorBookmakers: surfacedEdge.anchorBookmakers.map((k) => titleForBook(event, k)),
+          effectiveBookCount: surfacedEdge.effectiveBookCount,
+          targetQuoteAgeSeconds: surfacedEdge.targetQuoteAgeSeconds,
+          ...(surfacedEdge.lastUpdate ? { updatedAt: surfacedEdge.lastUpdate } : {}),
         }
       : undefined
 

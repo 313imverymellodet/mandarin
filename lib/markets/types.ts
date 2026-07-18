@@ -22,28 +22,42 @@ export interface PlatformQuote {
 }
 
 /**
- * A de-vigged positive-EV opportunity: a single book pricing one outcome
- * better than the sharp/consensus fair value. Estimated long-run edge — NOT
- * guaranteed profit like an arbitrage.
+ * A de-vigged positive-EV opportunity (Edge Engine V2): a single book pricing
+ * one outcome better than a target-excluded sharp/consensus fair value.
+ * Estimated long-run edge after an uncertainty haircut and execution buffer —
+ * NOT guaranteed profit like an arbitrage.
  */
 export interface EdgeDTO {
+  version: 2
+  profile: "conservative" | "balanced" | "aggressive"
   market: "h2h" | "spreads" | "totals"
   outcome: string
   /** Bookmaker to place the bet at (display name, e.g. "DraftKings"). */
   bookmaker: string
   decimal: number
+  /** Fair (no-vig) decimal price implied by the anchor. */
+  fairDecimal: number
   /** Canonical 0..1 fair probability. */
   fairProbability: number
-  /** UI-ready percentages. */
-  fairProbabilityPct: number
-  evPct: number
-  kellyStakeFraction: number
-  kellyStakePct: number
-  /** 0..100 confidence — depth/agreement/anchor/timing. NOT a win probability. */
+  /** Fair probability minus the uncertainty haircut (0..1) — Kelly uses this. */
+  conservativeFairProbability: number
+  /** Estimated 1-sigma uncertainty on the fair probability. */
+  probabilitySigma: number
+  /** Raw point-estimate EV%, shown only in details. */
+  rawEvPct: number
+  /** EV% using the conservative probability. */
+  conservativeEvPct: number
+  /** Headline: conservative EV% after the execution buffer. */
+  netEvPct: number
+  /** 0..100 signal-quality score — data/model quality, NOT a win probability. */
   confidence: number
+  /** Suggested bankroll fraction (conservative, capped fractional Kelly). */
+  kellyStakeFraction: number
   anchorSource: "sharp" | "consensus"
-  anchorBookmaker?: string
-  booksQuoting: number
+  anchorMode: "single_sharp" | "sharp_blend" | "consensus"
+  anchorBookmakers: string[]
+  effectiveBookCount: number
+  targetQuoteAgeSeconds: number | null
   updatedAt?: string
 }
 

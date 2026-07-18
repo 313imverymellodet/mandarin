@@ -42,14 +42,28 @@ export const config = {
       .split(",")
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
-    // Positive-EV engine defaults (see lib/markets/edge.ts). Server is the source
-    // of truth for which opportunities qualify.
+    // Positive-EV engine (see lib/markets/edge.ts). The V2 engine adds
+    // leave-one-book-out anchors, Power de-vig, uncertainty-adjusted net EV,
+    // and conservative capped Kelly. Risk profiles carry their own thresholds;
+    // these are engine-wide knobs. Server is the source of truth.
     edge: {
-      minimumEv: Number(env("ODDS_API_MIN_EV") ?? 0.015), // 1.5%
-      kellyFraction: Number(env("ODDS_API_KELLY_FRACTION") ?? 0.25), // quarter Kelly
       minConsensusBooks: Number(env("ODDS_API_MIN_CONSENSUS_BOOKS") ?? 3),
       targetBookCount: Number(env("ODDS_API_TARGET_BOOKS") ?? 6),
       agreementStdevCeiling: Number(env("ODDS_API_AGREEMENT_STDEV") ?? 0.08),
+    },
+    /**
+     * V2 rollout flags. Fail safe to current behavior on missing/invalid config.
+     *  - v2Enabled=false     → no +EV in the feed (arbitrage + watch only)
+     *  - v2Enabled + shadow  → compute V2 but do NOT publish it (dark launch)
+     *  - v2Enabled + !shadow → publish actionable V2 +EV opportunities
+     */
+    v2: {
+      enabled: env("EDGE_V2_ENABLED") !== "false", // default on
+      shadowMode: env("EDGE_V2_SHADOW_MODE") === "true", // default off (publish)
+      defaultProfile: (["conservative", "balanced", "aggressive"].includes(env("EDGE_V2_DEFAULT_PROFILE") ?? "")
+        ? env("EDGE_V2_DEFAULT_PROFILE")
+        : "balanced") as "conservative" | "balanced" | "aggressive",
+      requireTimestamps: env("EDGE_V2_REQUIRE_TIMESTAMPS") !== "false", // default on
     },
     get enabled() {
       return Boolean(this.key)

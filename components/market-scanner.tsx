@@ -66,7 +66,7 @@ function decimalToAmerican(decimal: number): string {
 /** Kind-aware ranking for the "edge" sort: arbitrage > +EV (ev×conf) > watch. */
 function edgeRank(o: OddsUpdate): number {
   if (o.kind === "arbitrage") return 1_000_000 + o.arbitrage
-  if (o.kind === "positive_ev") return 1_000 + (o.edge ? (o.edge.evPct * o.edge.confidence) / 100 : 0)
+  if (o.kind === "positive_ev") return 1_000 + (o.edge ? (o.edge.netEvPct * o.edge.confidence) / 100 : 0)
   return o.arbitrage // watch: negative gap-to-arb
 }
 
@@ -171,7 +171,7 @@ export function MarketScanner() {
 
   const arbs = allOpportunities.filter((o) => o.kind === "arbitrage")
   const evPlays = allOpportunities.filter((o) => o.kind === "positive_ev")
-  const bestEv = evPlays.length > 0 ? Math.max(...evPlays.map((o) => o.edge?.evPct ?? 0)) : null
+  const bestEv = evPlays.length > 0 ? Math.max(...evPlays.map((o) => o.edge?.netEvPct ?? 0)) : null
   const bestEdge = allOpportunities.length > 0 ? Math.max(...allOpportunities.map((o) => o.arbitrage)) : null
   // Prioritise showing the hottest actionable signal: arbs, then +EV, then closest gap.
   const hot = [...opportunities].sort((a, b) => edgeRank(b) - edgeRank(a)).slice(0, 3)
@@ -195,7 +195,7 @@ export function MarketScanner() {
         <StatTile label="Arbitrage" value={String(arbs.length)} accent={arbs.length > 0 ? "green" : undefined} />
         <StatTile label="+EV plays" value={String(evPlays.length)} accent={evPlays.length > 0 ? "green" : undefined} />
         <StatTile
-          label="Best +EV"
+          label="Best net EV"
           value={bestEv === null ? "—" : `+${bestEv.toFixed(2)}%`}
           accent={bestEv !== null ? "green" : undefined}
         />
@@ -473,9 +473,9 @@ function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolea
           {isEv && o.edge ? (
             <>
               <div className={`flex items-center gap-1 font-semibold tabular-nums ${edgeColor(o)}`}>
-                +{o.edge.evPct.toFixed(2)}%
+                +{o.edge.netEvPct.toFixed(2)}%
               </div>
-              <div className="text-[11px] text-muted-foreground">EV · {o.edge.confidence}/100</div>
+              <div className="text-[11px] text-muted-foreground">net EV · SQ {o.edge.confidence}</div>
               {/* confidence bar */}
               <div className="mt-1 h-1 w-16 overflow-hidden rounded-full bg-muted">
                 <div className="h-full rounded-full bg-emerald-500" style={{ width: `${o.edge.confidence}%` }} />
@@ -518,17 +518,17 @@ function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolea
                 <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                      <Zap className="h-4 w-4" aria-hidden="true" /> +{o.edge.evPct.toFixed(2)}% EV
-                      <HelpTip label="EV">
-                        Expected return per dollar across many identical bets. +5% EV ≈ $105 back per $100 on average — not on
-                        this one bet.
+                      <Zap className="h-4 w-4" aria-hidden="true" /> +{o.edge.netEvPct.toFixed(2)}% net EV
+                      <HelpTip label="net EV">
+                        Expected return per $1 over many identical bets, after an uncertainty haircut and an execution buffer.
+                        Deliberately more conservative than raw EV. Not a promise on this one bet.
                       </HelpTip>
                     </span>
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                      Confidence {o.edge.confidence}/100
-                      <HelpTip label="Confidence">
-                        A <strong>data-quality</strong> score — book depth, agreement, sharp anchor, timing. It is{" "}
-                        <strong>not</strong> the chance this bet wins.
+                      Signal quality {o.edge.confidence}/100
+                      <HelpTip label="Signal quality">
+                        A <strong>data/model-quality</strong> score — book depth, agreement, sharp-anchor share, freshness,
+                        timing. It is <strong>not</strong> the chance this bet wins.
                       </HelpTip>
                     </span>
                   </div>
@@ -538,32 +538,56 @@ function ScannerRow({ o, expanded, onToggle }: { o: OddsUpdate; expanded: boolea
                   </p>
                   <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-3">
                     <span className="flex items-center gap-1">
-                      Fair prob: <span className="tabular-nums text-foreground">{o.edge.fairProbabilityPct.toFixed(1)}%</span>
-                      <HelpTip label="Fair probability">
-                        The true chance of this outcome once the book&apos;s fee (the vig) is stripped out of the sharp line.
+                      Fair win prob:{" "}
+                      <span className="tabular-nums text-foreground">{(o.edge.fairProbability * 100).toFixed(1)}%</span>
+                      <HelpTip label="Fair win probability">
+                        The true chance of this outcome after stripping the vig from a target-excluded sharp/consensus anchor
+                        (the book we&apos;re judging is left out of its own benchmark).
                       </HelpTip>
                     </span>
                     <span className="flex items-center gap-1">
-                      ¼ Kelly: <span className="tabular-nums text-foreground">{o.edge.kellyStakePct.toFixed(2)}% bankroll</span>
-                      <HelpTip label="Quarter Kelly">
-                        A staking guide. Full Kelly is growth-optimal but wildly swingy, so we suggest a quarter of it, as a %
-                        of your bankroll.
-                      </HelpTip>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      Fair value:{" "}
-                      <span className="text-foreground">
-                        {o.edge.anchorSource === "sharp" ? (o.edge.anchorBookmaker ?? "Sharp book") : "Consensus"}
+                      Conservative:{" "}
+                      <span className="tabular-nums text-foreground">
+                        {(o.edge.conservativeFairProbability * 100).toFixed(1)}%
                       </span>
-                      <HelpTip label="Fair value">
-                        Whose line defined the true odds. Pinnacle is the sharp book pros bet into; Consensus blends 3+ books
-                        when Pinnacle isn&apos;t available.
+                      <HelpTip label="Conservative probability">
+                        Fair probability minus an uncertainty haircut. Kelly sizing uses this lower number, not the optimistic
+                        point estimate.
+                      </HelpTip>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      Suggested stake:{" "}
+                      <span className="tabular-nums text-foreground">
+                        {(o.edge.kellyStakeFraction * 100).toFixed(2)}% bankroll
+                      </span>
+                      <HelpTip label="Suggested stake">
+                        Conservative capped fractional Kelly ({o.edge.profile} profile) on the conservative probability. A
+                        bankroll-sizing reference, not a required stake.
+                      </HelpTip>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      Anchor:{" "}
+                      <span className="text-foreground">
+                        {o.edge.anchorSource === "sharp"
+                          ? (o.edge.anchorBookmakers[0] ?? "Sharp book")
+                          : `Consensus (${o.edge.effectiveBookCount.toFixed(1)} books)`}
+                      </span>
+                      <HelpTip label="Anchor">
+                        Whose line defined the true odds. Pinnacle is the sharp book pros bet into; Consensus blends multiple
+                        fresh books. The target book is always excluded from its own anchor.
+                      </HelpTip>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      Raw EV: <span className="tabular-nums text-muted-foreground">+{o.edge.rawEvPct.toFixed(2)}%</span>
+                      <HelpTip label="Raw EV">
+                        The unadjusted point-estimate edge, before the uncertainty haircut and execution buffer. Shown for
+                        reference — net EV is the honest number.
                       </HelpTip>
                     </span>
                   </div>
                   <p className="mt-2 text-[11px] text-muted-foreground">
-                    Estimated long-run edge — not guaranteed on any single bet. Confidence is a data-quality score, not a win
-                    probability. Verify the line before staking.
+                    Estimated long-run edge over many bets — not guaranteed on any single one, which can lose. Signal quality
+                    is data/model quality, not a win probability. Verify the line before staking.
                   </p>
                 </div>
               )}
@@ -638,7 +662,7 @@ function fmtEdge(edge: number): string {
 
 /** Headline figure for hot strip: EV% for +EV rows, arb/gap otherwise. */
 function headlineValue(o: OddsUpdate): string {
-  if (o.kind === "positive_ev" && o.edge) return `+${o.edge.evPct.toFixed(2)}% EV`
+  if (o.kind === "positive_ev" && o.edge) return `+${o.edge.netEvPct.toFixed(2)}% EV`
   return fmtEdge(o.arbitrage)
 }
 

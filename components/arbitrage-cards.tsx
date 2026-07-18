@@ -344,9 +344,9 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
             {isEv && opportunity.edge ? (
               <>
                 <span className="text-emerald-600 dark:text-emerald-400 font-bold text-lg sm:text-xl tabular-nums">
-                  +{opportunity.edge.evPct.toFixed(2)}%
+                  +{opportunity.edge.netEvPct.toFixed(2)}%
                 </span>
-                <p className="text-xs text-muted-foreground">est. EV · {opportunity.edge.confidence}/100</p>
+                <p className="text-xs text-muted-foreground">net EV · SQ {opportunity.edge.confidence}</p>
               </>
             ) : isArb ? (
               <>
@@ -420,22 +420,33 @@ function ArbitrageCard({ opportunity }: { opportunity: OddsUpdate }) {
             </p>
             <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
               <span>
-                Fair prob:{" "}
-                <span className="tabular-nums text-foreground">{opportunity.edge.fairProbabilityPct.toFixed(1)}%</span>
+                Fair win prob:{" "}
+                <span className="tabular-nums text-foreground">{(opportunity.edge.fairProbability * 100).toFixed(1)}%</span>
               </span>
               <span>
-                ¼ Kelly:{" "}
-                <span className="tabular-nums text-foreground">{opportunity.edge.kellyStakePct.toFixed(2)}% bankroll</span>
+                Conservative:{" "}
+                <span className="tabular-nums text-foreground">
+                  {(opportunity.edge.conservativeFairProbability * 100).toFixed(1)}%
+                </span>
               </span>
               <span>
-                Fair value:{" "}
+                Suggested stake:{" "}
+                <span className="tabular-nums text-foreground">
+                  {(opportunity.edge.kellyStakeFraction * 100).toFixed(2)}% bankroll
+                </span>
+              </span>
+              <span>
+                Anchor:{" "}
                 <span className="text-foreground">
-                  {opportunity.edge.anchorSource === "sharp" ? (opportunity.edge.anchorBookmaker ?? "Sharp book") : "Consensus"}
+                  {opportunity.edge.anchorSource === "sharp"
+                    ? (opportunity.edge.anchorBookmakers[0] ?? "Sharp book")
+                    : "Consensus"}
                 </span>
               </span>
             </div>
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Estimated long-run edge — not guaranteed on any single bet. Verify the line before staking.
+              Estimated long-run edge over many bets — not guaranteed on any single one. Signal quality is data quality, not a
+              win probability. Verify the line before staking.
             </p>
           </div>
         )}
