@@ -1,6 +1,7 @@
 import { config } from "@/lib/config"
 import { findBestLines, riskForEdge, decimalToImpliedPct, type OutcomeQuote } from "./arbitrage"
 import { analyzePositiveEV, type EdgeOpportunity } from "./edge"
+import { recordEdgeTelemetry, type TelemetryEvent } from "./telemetry"
 import type { EdgeDTO, MarketCategory, OpportunityDTO, PlatformQuote } from "./types"
 
 /**
@@ -118,6 +119,7 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
   const usBooks = new Set(config.oddsApi.books)
   const staleBefore = now - config.oddsApi.maxQuoteAgeMs
   const opportunities: OpportunityDTO[] = []
+  const telemetryEvents: TelemetryEvent[] = []
 
   for (const event of events) {
     // Fresh quotes from every requested book, INCLUDING the sharp anchor
@@ -158,8 +160,8 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
     // disabled → skip entirely; each target is judged by an anchor that
     // excludes itself, so a book can never move its own benchmark.
     const v2 = config.oddsApi.v2
-    const edgeBest: EdgeOpportunity | null = v2.enabled
-      ? (analyzePositiveEV(anchorQuotes, {
+    const analysis = v2.enabled
+      ? analyzePositiveEV(anchorQuotes, {
           riskProfile: v2.defaultProfile,
           sharpBookmakers: config.oddsApi.sharpBooks,
           eligibleBookmakers: config.oddsApi.books,
@@ -171,8 +173,21 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
           agreementStdevCeiling: config.oddsApi.edge.agreementStdevCeiling,
           eventTime: event.commence_time,
           asOf,
-        })?.best ?? null)
+        })
       : null
+    const edgeBest: EdgeOpportunity | null = analysis?.best ?? null
+
+    // Shadow telemetry: retain the full analysis (including rejected
+    // evaluations) so the model can later be scored on closing-line value.
+    if (analysis) {
+      telemetryEvents.push({
+        eventId: `oddsapi-${event.id}`,
+        league: leagueLabel(event.sport_key, event.sport_title),
+        matchup: `${event.away_team} @ ${event.home_team}`,
+        commenceTime: event.commence_time,
+        analysis,
+      })
+    }
 
     // Shadow mode computes V2 but withholds it from the public feed.
     const surfacedEdge = v2.enabled && !v2.shadowMode ? edgeBest : null
@@ -245,6 +260,9 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
       lastUpdated: asOf,
     })
   }
+
+  // Best-effort; never awaited, never allowed to fail the odds response.
+  recordEdgeTelemetry(sportKey, asOf, telemetryEvents)
 
   return opportunities
 }
