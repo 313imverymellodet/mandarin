@@ -49,6 +49,8 @@ export interface AnchorBookWeight {
   freshness: number
   ageSeconds: number | null
   outlierMultiplier: number
+  /** Optional dependency bucket used to avoid overstating independent depth. */
+  correlationGroup?: string
 }
 
 /** Fair-value estimate and the diagnostics used to form it. */
@@ -63,6 +65,8 @@ export interface FairValueAnchor {
   effectiveBookCount: number
   sharpWeightShare: number
   weightedFreshness: number
+  /** Weighted age of timestamped anchor books relative to `asOf`. */
+  weightedAgeSeconds: number | null
   probabilityStdevs: number[]
   methodStdevs: number[]
   probabilitySigmas: number[]
@@ -78,12 +82,15 @@ export interface ConfidenceBreakdown {
   timeToEvent: number
   freshness: number
   targetFreshness: number
+  /** Agreement between target quote time and the weighted anchor time. */
+  targetAnchorTimeAgreement: number
   modelStability: number
   meanProbabilityStdev: number | null
   meanMethodStdev: number | null
   effectiveBookCount: number
   sharpWeightShare: number
   targetQuoteAgeSeconds: number | null
+  targetAnchorSkewSeconds: number | null
   timeToEventHours: number | null
 }
 
@@ -91,7 +98,9 @@ export interface ConfidenceBreakdown {
 export type EdgeRejectionReason =
   | "book_not_eligible"
   | "target_quote_timestamp_missing"
+  | "target_quote_in_future"
   | "target_quote_stale"
+  | "target_anchor_time_skew"
   | "event_started"
   | "too_close_to_event"
   | "fair_probability_below_profile"
@@ -118,16 +127,23 @@ export interface EvaluatedQuote {
   /** EV computed with a lower-confidence probability estimate. */
   conservativeEv: number
   conservativeEvPct: number
-  /** Conservative EV after the configured execution/model buffer. */
+  /** Conservative EV after the age/skew-aware execution/model buffer. */
   netEv: number
   netEvPct: number
+  /** Total EV haircut actually applied to this quote. */
+  executionBufferEvApplied: number
+  executionBufferEvAppliedPct: number
+  /** Probability implied by buffered net EV; used for production stake sizing. */
+  executionAdjustedProbability: number
   /** Full Kelly from the raw point estimate, retained for diagnostics only. */
   fullKellyFraction: number
   /** Full Kelly from the conservative probability estimate. */
   conservativeFullKellyFraction: number
-  /** Conservative fractional Kelly after the hard bankroll cap. */
+  /** Buffered fractional Kelly after the hard bankroll cap; zero if rejected. */
   kellyStakeFraction: number
   kellyStakePct: number
+  /** Expected log-bankroll growth at the suggested stake, using buffered probability. */
+  expectedLogGrowth: number
   confidence: number
   confidenceBreakdown: ConfidenceBreakdown
   anchorSource: FairValueSource
@@ -136,6 +152,7 @@ export interface EvaluatedQuote {
   anchorBookmakers: string[]
   effectiveBookCount: number
   targetQuoteAgeSeconds: number | null
+  targetAnchorSkewSeconds: number | null
   isActionable: boolean
   rejectionReasons: EdgeRejectionReason[]
   lastUpdate?: string
@@ -179,6 +196,10 @@ export interface EdgeOptions {
   blendSharpWithConsensus?: boolean
   /** Per-book reliability multipliers, keyed by lowercase bookmaker key. */
   bookmakerWeights?: Readonly<Record<string, number>>
+  /** Optional dependency buckets for books sharing a source/trading model. */
+  bookmakerCorrelationGroups?: Readonly<Record<string, string>>
+  /** Maximum combined group weight relative to its strongest member. */
+  correlationGroupWeightCap?: number
   /** Default multiplier for configured sharp books. */
   sharpBookWeight?: number
   /** Maximum total soft-book weight relative to sharp weight in a sharp blend. */
@@ -187,8 +208,14 @@ export interface EdgeOptions {
   recencyHalfLifeSeconds?: number
   /** Anchor book is excluded when its oldest required side is older than this. */
   maxAnchorQuoteAgeSeconds?: number
+  /** Reject an anchor book whose outcome timestamps are spread farther apart. */
+  maxBookSideTimestampSkewSeconds?: number
   /** Target quote is not actionable when older than this. */
   maxTargetQuoteAgeSeconds?: number
+  /** Allow small provider/server clock drift; larger future timestamps are rejected. */
+  maxFutureQuoteSkewSeconds?: number
+  /** Reject a target whose observation time is too far from its anchor's weighted time. */
+  maxTargetAnchorSkewSeconds?: number
   /** Exclude quotes without parseable timestamps when true. */
   requireQuoteTimestamps?: boolean
   /** Recency multiplier for missing timestamps when timestamps are not required. */
@@ -222,8 +249,12 @@ export interface EdgeOptions {
   minimumConservativeEv?: number
   /** Conservative EV threshold after execution/model buffer. */
   minimumNetEv?: number
-  /** Flat EV haircut for feed delay, movement, rounding, and execution friction. */
+  /** Base EV haircut for feed delay, movement, rounding, and execution friction. */
   executionBufferEv?: number
+  /** Additional haircut that grows as the target approaches its maximum allowed age. */
+  ageExecutionBufferEv?: number
+  /** Additional haircut that grows with target-versus-anchor timestamp skew. */
+  skewExecutionBufferEv?: number
   /** Minimum signal-quality score in the 0..100 range. */
   minimumConfidence?: number
   /** Filters lower-probability longshots when a higher raw hit rate is preferred. */
@@ -244,6 +275,8 @@ export interface EdgeOptions {
   agreementStdevCeiling?: number
   /** De-vig-method stdev that maps model-stability score to zero. */
   methodStdevCeiling?: number
+  /** Binary calibration is not multiclass calibration; opt in explicitly for 3-way. */
+  allowThreeWayPerOutcomeCalibration?: boolean
 }
 
 /** Point-bearing quote used only to detect possible spread/total middles. */
@@ -289,6 +322,9 @@ export interface EdgeRiskPreset {
   minimumConservativeEv: number
   minimumNetEv: number
   executionBufferEv: number
+  ageExecutionBufferEv: number
+  skewExecutionBufferEv: number
+  maxTargetAnchorSkewSeconds: number
   minimumConfidence: number
   minimumFairProbability: number
   kellyFraction: number
@@ -308,11 +344,16 @@ interface ResolvedEdgeOptions {
   excludeTargetBookFromAnchor: boolean
   blendSharpWithConsensus: boolean
   bookmakerWeights: Map<string, number>
+  bookmakerCorrelationGroups: Map<string, string>
+  correlationGroupWeightCap: number
   sharpBookWeight: number
   maxSoftToSharpWeightRatio: number
   recencyHalfLifeSeconds: number
   maxAnchorQuoteAgeSeconds: number
+  maxBookSideTimestampSkewSeconds: number
   maxTargetQuoteAgeSeconds: number
+  maxFutureQuoteSkewSeconds: number
+  maxTargetAnchorSkewSeconds: number
   requireQuoteTimestamps: boolean
   missingTimestampWeight: number
   minimumOverround: number
@@ -330,6 +371,8 @@ interface ResolvedEdgeOptions {
   minimumConservativeEv: number
   minimumNetEv: number
   executionBufferEv: number
+  ageExecutionBufferEv: number
+  skewExecutionBufferEv: number
   minimumConfidence: number
   minimumFairProbability: number
   kellyFraction: number
@@ -340,6 +383,7 @@ interface ResolvedEdgeOptions {
   targetBookCount: number
   agreementStdevCeiling: number
   methodStdevCeiling: number
+  allowThreeWayPerOutcomeCalibration: boolean
 }
 
 interface BookFairValue {
@@ -353,6 +397,7 @@ interface BookFairValue {
   baseWeight: number
   outlierMultiplier: number
   finalWeight: number
+  correlationGroup: string
   clr: number[]
 }
 
@@ -365,6 +410,7 @@ interface InternalAnchor {
   effectiveBookCount: number
   sharpWeightShare: number
   weightedFreshness: number
+  weightedAgeSeconds: number | null
   contributingBookmakers: string[]
 }
 
@@ -378,6 +424,9 @@ const RISK_PRESETS: Readonly<Record<EdgeRiskProfile, EdgeRiskPreset>> = {
     minimumConservativeEv: 0.01,
     minimumNetEv: 0.0025,
     executionBufferEv: 0.0075,
+    ageExecutionBufferEv: 0.004,
+    skewExecutionBufferEv: 0.005,
+    maxTargetAnchorSkewSeconds: 60,
     minimumConfidence: 75,
     minimumFairProbability: 0.5,
     kellyFraction: 0.125,
@@ -393,6 +442,9 @@ const RISK_PRESETS: Readonly<Record<EdgeRiskProfile, EdgeRiskPreset>> = {
     minimumConservativeEv: 0.005,
     minimumNetEv: 0,
     executionBufferEv: 0.005,
+    ageExecutionBufferEv: 0.003,
+    skewExecutionBufferEv: 0.004,
+    maxTargetAnchorSkewSeconds: 90,
     minimumConfidence: 65,
     minimumFairProbability: 0.3,
     kellyFraction: 0.25,
@@ -408,6 +460,9 @@ const RISK_PRESETS: Readonly<Record<EdgeRiskProfile, EdgeRiskPreset>> = {
     minimumConservativeEv: 0,
     minimumNetEv: 0,
     executionBufferEv: 0.003,
+    ageExecutionBufferEv: 0.002,
+    skewExecutionBufferEv: 0.003,
+    maxTargetAnchorSkewSeconds: 120,
     minimumConfidence: 55,
     minimumFairProbability: 0.15,
     kellyFraction: 0.25,
@@ -541,10 +596,18 @@ export function devigOdds(
 export function applyProbabilityCalibration(
   probabilities: readonly number[],
   calibration: ProbabilityCalibration | undefined,
+  allowThreeWayPerOutcomeCalibration = false,
 ): number[] | null {
   if (probabilities.length !== 2 && probabilities.length !== 3) return null
   if (probabilities.some((probability) => !isProbability(probability))) return null
   if (calibration === undefined) return normalizeProbabilities(probabilities)
+
+  // Beta and isotonic mappings here are binary one-vs-rest calibrators. Applying
+  // them independently to a 3-way market and renormalizing is not a substitute
+  // for a fitted multiclass calibrator, so production defaults to no 3-way map.
+  if (probabilities.length === 3 && !allowThreeWayPerOutcomeCalibration) {
+    return normalizeProbabilities(probabilities)
+  }
 
   const calibrated = probabilities.map((probability) => {
     const p = clamp(probability, PROBABILITY_EPSILON, 1 - PROBABILITY_EPSILON)
@@ -601,8 +664,9 @@ export function getEdgeRiskPreset(profile: EdgeRiskProfile): Readonly<EdgeRiskPr
 }
 
 /**
- * Builds a global fair-value anchor. This is useful for display and diagnostics.
- * `analyzePositiveEV` goes further and builds a separate leave-one-book-out
+ * Builds a global fair-value anchor for one complete 2-way or 3-way h2h market.
+ * This function intentionally returns null for spreads, totals, or any point-bearing
+ * quote. `analyzePositiveEV` goes further and builds a separate leave-one-book-out
  * anchor for every target bookmaker so a book cannot validate its own price.
  */
 export function buildFairValueAnchor(
@@ -616,9 +680,10 @@ export function buildFairValueAnchor(
 }
 
 /**
- * Evaluates every complete target quote using a target-excluded, freshness-aware,
- * robust fair-value anchor. It reports raw EV, uncertainty-adjusted EV, buffered
- * net EV, confidence, rejection reasons, and capped conservative Kelly sizing.
+ * Evaluates every complete target quote in one 2-way or 3-way h2h market using a
+ * target-excluded, freshness-aware, robust fair-value anchor. It reports raw EV,
+ * uncertainty-adjusted EV, buffered net EV, confidence, rejection reasons, and
+ * capped conservative Kelly sizing. Point-bearing markets fail closed.
  */
 export function analyzePositiveEV(
   quotes: readonly OutcomeQuote[],
@@ -631,7 +696,7 @@ export function analyzePositiveEV(
   const globalAnchor = buildAnchorFromPrepared(prepared, resolved, null)
   if (globalAnchor === null) return null
 
-  const completeBookCount = getCompletePreparedBooks(prepared).length
+  const validBooksQuoting = globalAnchor.contributingBookmakers.length
   const evaluations: EvaluatedQuote[] = []
   const anchorCache = new Map<string, InternalAnchor | null>()
 
@@ -664,7 +729,6 @@ export function analyzePositiveEV(
         fairProbability,
         probabilitySigma,
         anchor,
-        completeBookCount,
         resolved,
       )
       if (evaluated !== null) evaluations.push(evaluated)
@@ -674,11 +738,11 @@ export function analyzePositiveEV(
   evaluations.sort(compareEvaluatedQuotes)
   const bestEvaluation = evaluations.find((evaluation) => evaluation.isActionable)
   const best: EdgeOpportunity | null = bestEvaluation
-    ? { ...bestEvaluation, booksQuoting: completeBookCount }
+    ? { ...bestEvaluation, booksQuoting: validBooksQuoting }
     : null
 
   const representative = bestEvaluation ?? evaluations[0]
-  const fallbackConfidence = calculateConfidence(globalAnchor, null, resolved)
+  const fallbackConfidence = calculateConfidence(globalAnchor, null, null, resolved)
 
   return {
     anchor: globalAnchor.public,
@@ -687,7 +751,7 @@ export function analyzePositiveEV(
     confidence: representative?.confidence ?? fallbackConfidence.score,
     confidenceBreakdown:
       representative?.confidenceBreakdown ?? fallbackConfidence.breakdown,
-    booksQuoting: completeBookCount,
+    booksQuoting: validBooksQuoting,
   }
 }
 
@@ -791,7 +855,6 @@ function evaluateQuote(
   fairProbability: number,
   probabilitySigma: number,
   anchor: InternalAnchor,
-  completeBookCount: number,
   options: ResolvedEdgeOptions,
 ): EvaluatedQuote | null {
   const rawEv = expectedValue(quote.decimal, fairProbability)
@@ -804,10 +867,30 @@ function evaluateQuote(
   )
   const conservativeEv = expectedValue(quote.decimal, conservativeFairProbability)
   if (conservativeEv === null) return null
-  const netEv = conservativeEv - options.executionBufferEv
 
   const targetAgeSeconds = calculateQuoteAgeSeconds(quote.lastUpdate, options.asOf)
-  const confidence = calculateConfidence(anchor, targetAgeSeconds, options)
+  const targetAnchorSkewSeconds = calculateTargetAnchorSkewSeconds(
+    targetAgeSeconds,
+    anchor.weightedAgeSeconds,
+  )
+  const executionBufferEvApplied = calculateExecutionBuffer(
+    targetAgeSeconds,
+    targetAnchorSkewSeconds,
+    options,
+  )
+  const netEv = conservativeEv - executionBufferEvApplied
+  const executionAdjustedProbability = clamp(
+    (1 + netEv) / quote.decimal,
+    PROBABILITY_EPSILON,
+    1 - PROBABILITY_EPSILON,
+  )
+
+  const confidence = calculateConfidence(
+    anchor,
+    targetAgeSeconds,
+    targetAnchorSkewSeconds,
+    options,
+  )
   const rejectionReasons = getRejectionReasons(
     quote.bookmakerKey,
     fairProbability,
@@ -816,6 +899,7 @@ function evaluateQuote(
     netEv,
     confidence.score,
     targetAgeSeconds,
+    targetAnchorSkewSeconds,
     options,
   )
 
@@ -825,13 +909,23 @@ function evaluateQuote(
     conservativeFairProbability,
     1,
   )
-  const kellyStakeFraction = Math.min(
+  const proposedKellyStakeFraction = Math.min(
     fractionalKellyStake(
       quote.decimal,
-      conservativeFairProbability,
+      executionAdjustedProbability,
       options.kellyFraction,
     ),
     options.maximumKellyStakeFraction,
+  )
+  // A rejected signal may remain visible for diagnostics, but must never carry
+  // an automated bankroll recommendation.
+  const kellyStakeFraction = rejectionReasons.length === 0
+    ? proposedKellyStakeFraction
+    : 0
+  const expectedLogGrowth = calculateExpectedLogGrowth(
+    quote.decimal,
+    executionAdjustedProbability,
+    kellyStakeFraction,
   )
 
   const anchorBookmaker = anchor.public.bookmaker
@@ -853,10 +947,14 @@ function evaluateQuote(
     conservativeEvPct: conservativeEv * 100,
     netEv,
     netEvPct: netEv * 100,
+    executionBufferEvApplied,
+    executionBufferEvAppliedPct: executionBufferEvApplied * 100,
+    executionAdjustedProbability,
     fullKellyFraction,
     conservativeFullKellyFraction,
     kellyStakeFraction,
     kellyStakePct: kellyStakeFraction * 100,
+    expectedLogGrowth,
     confidence: confidence.score,
     confidenceBreakdown: confidence.breakdown,
     anchorSource: anchor.public.source,
@@ -865,6 +963,7 @@ function evaluateQuote(
     anchorBookmakers: [...anchor.contributingBookmakers],
     effectiveBookCount: anchor.effectiveBookCount,
     targetQuoteAgeSeconds: targetAgeSeconds,
+    targetAnchorSkewSeconds,
     isActionable: rejectionReasons.length === 0,
     rejectionReasons,
     ...(quote.lastUpdate ? { lastUpdate: quote.lastUpdate } : {}),
@@ -880,6 +979,7 @@ function getRejectionReasons(
   netEv: number,
   confidence: number,
   targetAgeSeconds: number | null,
+  targetAnchorSkewSeconds: number | null,
   options: ResolvedEdgeOptions,
 ): EdgeRejectionReason[] {
   const reasons: EdgeRejectionReason[] = []
@@ -895,9 +995,21 @@ function getRejectionReasons(
     reasons.push("target_quote_timestamp_missing")
   } else if (
     targetAgeSeconds !== null &&
+    targetAgeSeconds < -options.maxFutureQuoteSkewSeconds
+  ) {
+    reasons.push("target_quote_in_future")
+  } else if (
+    targetAgeSeconds !== null &&
     targetAgeSeconds > options.maxTargetQuoteAgeSeconds
   ) {
     reasons.push("target_quote_stale")
+  }
+
+  if (
+    targetAnchorSkewSeconds !== null &&
+    targetAnchorSkewSeconds > options.maxTargetAnchorSkewSeconds
+  ) {
+    reasons.push("target_anchor_time_skew")
   }
 
   const time = calculateTimeToEvent(options.eventTime, options.asOf)
@@ -933,7 +1045,13 @@ function buildAnchorFromPrepared(
   if (candidates.length === 0) return null
 
   const sharpCandidates = candidates.filter((book) => book.isSharp)
-  if (sharpCandidates.length === 0 && candidates.length < options.minConsensusBooks) {
+  const independentCandidateGroups = new Set(
+    candidates.map((book) => book.correlationGroup),
+  ).size
+  if (
+    sharpCandidates.length === 0 &&
+    independentCandidateGroups < options.minConsensusBooks
+  ) {
     return null
   }
 
@@ -947,6 +1065,7 @@ function buildAnchorFromPrepared(
 
   applyRobustOutlierWeights(candidates, options)
   applySharpBlendCap(candidates, options)
+  applyCorrelationGroupWeightCaps(candidates, options)
 
   const totalWeight = candidates.reduce((total, book) => total + book.finalWeight, 0)
   if (!Number.isFinite(totalWeight) || totalWeight <= EPSILON) return null
@@ -955,11 +1074,17 @@ function buildAnchorFromPrepared(
   const weightedClr = Array.from({ length: outcomeCount }, () => 0)
   let weightedOverround = 0
   let weightedFreshness = 0
+  let timestampedAgeWeight = 0
+  let weightedAge = 0
   let sharpWeight = 0
 
   for (const book of candidates) {
     weightedOverround += book.overround * book.finalWeight
     weightedFreshness += book.freshness * book.finalWeight
+    if (book.ageSeconds !== null) {
+      weightedAge += Math.max(0, book.ageSeconds) * book.finalWeight
+      timestampedAgeWeight += book.finalWeight
+    }
     if (book.isSharp) sharpWeight += book.finalWeight
 
     for (let index = 0; index < outcomeCount; index += 1) {
@@ -989,9 +1114,7 @@ function buildAnchorFromPrepared(
   )
   if (methodStdevs.some((value) => !Number.isFinite(value))) return null
 
-  const effectiveBookCount = calculateEffectiveBookCount(
-    candidates.map((book) => book.finalWeight),
-  )
+  const effectiveBookCount = calculateCorrelationAdjustedBookCount(candidates)
   const probabilitySigmas = calculateProbabilitySigmas(
     probabilityStdevs,
     methodStdevs,
@@ -1010,6 +1133,7 @@ function buildAnchorFromPrepared(
       freshness: book.freshness,
       ageSeconds: book.ageSeconds,
       outlierMultiplier: book.outlierMultiplier,
+      correlationGroup: book.correlationGroup,
     }))
     .sort((left, right) => {
       const weightDifference = right.normalizedWeight - left.normalizedWeight
@@ -1028,6 +1152,10 @@ function buildAnchorFromPrepared(
       : "sharp_blend"
     : "consensus"
 
+  const weightedAgeSeconds = timestampedAgeWeight > EPSILON
+    ? weightedAge / timestampedAgeWeight
+    : null
+
   const publicAnchor: FairValueAnchor = {
     source: hasSharp ? "sharp" : "consensus",
     mode,
@@ -1042,6 +1170,7 @@ function buildAnchorFromPrepared(
     effectiveBookCount,
     sharpWeightShare: sharpWeight / totalWeight,
     weightedFreshness: weightedFreshness / totalWeight,
+    weightedAgeSeconds,
     probabilityStdevs,
     methodStdevs,
     probabilitySigmas,
@@ -1057,6 +1186,7 @@ function buildAnchorFromPrepared(
     effectiveBookCount,
     sharpWeightShare: sharpWeight / totalWeight,
     weightedFreshness: weightedFreshness / totalWeight,
+    weightedAgeSeconds,
     contributingBookmakers,
   }
 }
@@ -1112,14 +1242,22 @@ function getBookFairValue(
 
   const primary = devigOdds(decimals, options.devigMethod)
   if (primary === null) return null
-  const probabilities = applyProbabilityCalibration(primary, options.calibration)
+  const probabilities = applyProbabilityCalibration(
+    primary,
+    options.calibration,
+    options.allowThreeWayPerOutcomeCalibration,
+  )
   if (probabilities === null) return null
 
   const methodVectors: number[][] = []
   for (const method of options.uncertaintyDevigMethods) {
     const raw = devigOdds(decimals, method)
     if (raw === null) continue
-    const calibrated = applyProbabilityCalibration(raw, options.calibration)
+    const calibrated = applyProbabilityCalibration(
+      raw,
+      options.calibration,
+      options.allowThreeWayPerOutcomeCalibration,
+    )
     if (calibrated !== null) methodVectors.push(calibrated)
   }
 
@@ -1135,7 +1273,12 @@ function getBookFairValue(
   let ageSeconds: number | null = null
   if (!hasMissingTimestamp && updateTimes.length === outcomeKeys.length && asOfMillis !== null) {
     const oldestRequiredSideMillis = Math.min(...updateTimes)
-    ageSeconds = Math.max(0, (asOfMillis - oldestRequiredSideMillis) / 1000)
+    const newestRequiredSideMillis = Math.max(...updateTimes)
+    const sideSkewSeconds = (newestRequiredSideMillis - oldestRequiredSideMillis) / 1000
+    if (sideSkewSeconds > options.maxBookSideTimestampSkewSeconds) return null
+
+    ageSeconds = (asOfMillis - oldestRequiredSideMillis) / 1000
+    if (ageSeconds < -options.maxFutureQuoteSkewSeconds) return null
   }
 
   if (options.requireQuoteTimestamps && ageSeconds === null) return null
@@ -1144,7 +1287,7 @@ function getBookFairValue(
   const freshness =
     ageSeconds === null
       ? options.missingTimestampWeight
-      : recencyScore(ageSeconds, options.recencyHalfLifeSeconds)
+      : recencyScore(Math.max(0, ageSeconds), options.recencyHalfLifeSeconds)
   const isSharp = options.sharpBookmakerSet.has(book.bookmaker)
   const explicitWeight = options.bookmakerWeights.get(book.bookmaker)
   const reliabilityWeight =
@@ -1153,6 +1296,7 @@ function getBookFairValue(
   const baseWeight = reliabilityWeight * freshness * holdFactor
   if (!Number.isFinite(baseWeight) || baseWeight <= EPSILON) return null
 
+  const correlationGroup = options.bookmakerCorrelationGroups.get(book.bookmaker) ?? book.bookmaker
   const clr = toCenteredLogRatio(probabilities)
   if (clr === null) return null
 
@@ -1167,6 +1311,7 @@ function getBookFairValue(
     baseWeight,
     outlierMultiplier: 1,
     finalWeight: baseWeight,
+    correlationGroup,
     clr,
   }
 }
@@ -1224,6 +1369,29 @@ function applySharpBlendCap(books: BookFairValue[], options: ResolvedEdgeOptions
   for (const book of softBooks) book.finalWeight *= scale
 }
 
+/** Caps a configured dependency cluster so cloned feeds cannot dominate fair value. */
+function applyCorrelationGroupWeightCaps(
+  books: BookFairValue[],
+  options: ResolvedEdgeOptions,
+): void {
+  const groups = new Map<string, BookFairValue[]>()
+  for (const book of books) {
+    const current = groups.get(book.correlationGroup) ?? []
+    current.push(book)
+    groups.set(book.correlationGroup, current)
+  }
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    const total = group.reduce((sum, book) => sum + book.finalWeight, 0)
+    const strongest = Math.max(...group.map((book) => book.finalWeight))
+    const cap = strongest * options.correlationGroupWeightCap
+    if (total <= cap + EPSILON || total <= EPSILON) continue
+    const scale = cap / total
+    for (const book of group) book.finalWeight *= scale
+  }
+}
+
 /** Combines observed dispersion, method disagreement, freshness, and sample depth. */
 function calculateProbabilitySigmas(
   probabilityStdevs: readonly number[],
@@ -1258,6 +1426,7 @@ function calculateProbabilitySigmas(
 function calculateConfidence(
   anchor: InternalAnchor,
   targetAgeSeconds: number | null,
+  targetAnchorSkewSeconds: number | null,
   options: ResolvedEdgeOptions,
 ): { score: number; breakdown: ConfidenceBreakdown } {
   const booksScore = clamp(anchor.effectiveBookCount / options.targetBookCount, 0, 1)
@@ -1265,11 +1434,7 @@ function calculateConfidence(
   const agreementScore =
     anchor.contributingBookmakers.length < 2
       ? 0.55
-      : clamp(
-          1 - meanProbabilityStdev / options.agreementStdevCeiling,
-          0,
-          1,
-        )
+      : clamp(1 - meanProbabilityStdev / options.agreementStdevCeiling, 0, 1)
   const sharpAnchorScore =
     anchor.sharpWeightShare <= EPSILON
       ? 0.45
@@ -1283,17 +1448,22 @@ function calculateConfidence(
   const targetFreshness =
     targetAgeSeconds === null
       ? options.missingTimestampWeight
-      : recencyScore(targetAgeSeconds, options.recencyHalfLifeSeconds)
+      : recencyScore(Math.max(0, targetAgeSeconds), options.recencyHalfLifeSeconds)
+  const targetAnchorTimeAgreement =
+    targetAnchorSkewSeconds === null
+      ? options.missingTimestampWeight
+      : clamp(1 - targetAnchorSkewSeconds / options.maxTargetAnchorSkewSeconds, 0, 1)
   const time = calculateTimeToEventScore(options.eventTime, options.asOf)
 
   const rawScore =
-    booksScore * 0.2 +
-    agreementScore * 0.2 +
-    sharpAnchorScore * 0.18 +
-    anchor.weightedFreshness * 0.16 +
-    targetFreshness * 0.12 +
+    booksScore * 0.18 +
+    agreementScore * 0.19 +
+    sharpAnchorScore * 0.17 +
+    anchor.weightedFreshness * 0.13 +
+    targetFreshness * 0.1 +
+    targetAnchorTimeAgreement * 0.1 +
     modelStabilityScore * 0.08 +
-    time.score * 0.06
+    time.score * 0.05
 
   const breakdown: ConfidenceBreakdown = {
     books: booksScore,
@@ -1302,12 +1472,14 @@ function calculateConfidence(
     timeToEvent: time.score,
     freshness: anchor.weightedFreshness,
     targetFreshness,
+    targetAnchorTimeAgreement,
     modelStability: modelStabilityScore,
     meanProbabilityStdev,
     meanMethodStdev,
     effectiveBookCount: anchor.effectiveBookCount,
     sharpWeightShare: anchor.sharpWeightShare,
     targetQuoteAgeSeconds: targetAgeSeconds,
+    targetAnchorSkewSeconds,
     timeToEventHours: time.hours,
   }
 
@@ -1326,11 +1498,20 @@ function resolveOptions(options: EdgeOptions): ResolvedEdgeOptions {
     options.uncertaintyDevigMethods ?? DEFAULT_UNCERTAINTY_METHODS,
   )
   const bookmakerWeights = new Map<string, number>()
+  const bookmakerCorrelationGroups = new Map<string, string>()
 
   if (options.bookmakerWeights) {
     for (const [bookmaker, weight] of Object.entries(options.bookmakerWeights)) {
       const key = normalizeKey(bookmaker)
       if (key && Number.isFinite(weight) && weight > 0) bookmakerWeights.set(key, weight)
+    }
+  }
+
+  if (options.bookmakerCorrelationGroups) {
+    for (const [bookmaker, group] of Object.entries(options.bookmakerCorrelationGroups)) {
+      const key = normalizeKey(bookmaker)
+      const groupKey = normalizeKey(group)
+      if (key && groupKey) bookmakerCorrelationGroups.set(key, groupKey)
     }
   }
 
@@ -1354,6 +1535,8 @@ function resolveOptions(options: EdgeOptions): ResolvedEdgeOptions {
     excludeTargetBookFromAnchor: options.excludeTargetBookFromAnchor ?? true,
     blendSharpWithConsensus: options.blendSharpWithConsensus ?? true,
     bookmakerWeights,
+    bookmakerCorrelationGroups,
+    correlationGroupWeightCap: positiveFinite(options.correlationGroupWeightCap, 1.25),
     sharpBookWeight: positiveFinite(options.sharpBookWeight, 3),
     maxSoftToSharpWeightRatio: positiveFinite(options.maxSoftToSharpWeightRatio, 1.5),
     recencyHalfLifeSeconds: positiveFinite(options.recencyHalfLifeSeconds, 300),
@@ -1361,9 +1544,18 @@ function resolveOptions(options: EdgeOptions): ResolvedEdgeOptions {
       options.maxAnchorQuoteAgeSeconds,
       preset.maxAnchorQuoteAgeSeconds,
     ),
+    maxBookSideTimestampSkewSeconds: nonNegativeFinite(
+      options.maxBookSideTimestampSkewSeconds,
+      15,
+    ),
     maxTargetQuoteAgeSeconds: nonNegativeFinite(
       options.maxTargetQuoteAgeSeconds,
       preset.maxTargetQuoteAgeSeconds,
+    ),
+    maxFutureQuoteSkewSeconds: nonNegativeFinite(options.maxFutureQuoteSkewSeconds, 5),
+    maxTargetAnchorSkewSeconds: positiveFinite(
+      options.maxTargetAnchorSkewSeconds,
+      preset.maxTargetAnchorSkewSeconds,
     ),
     requireQuoteTimestamps: options.requireQuoteTimestamps ?? false,
     missingTimestampWeight: clamp(
@@ -1403,6 +1595,14 @@ function resolveOptions(options: EdgeOptions): ResolvedEdgeOptions {
       options.executionBufferEv,
       preset.executionBufferEv,
     ),
+    ageExecutionBufferEv: nonNegativeFinite(
+      options.ageExecutionBufferEv,
+      preset.ageExecutionBufferEv,
+    ),
+    skewExecutionBufferEv: nonNegativeFinite(
+      options.skewExecutionBufferEv,
+      preset.skewExecutionBufferEv,
+    ),
     minimumConfidence: clamp(
       finiteOr(options.minimumConfidence, preset.minimumConfidence),
       0,
@@ -1427,6 +1627,8 @@ function resolveOptions(options: EdgeOptions): ResolvedEdgeOptions {
     targetBookCount: positiveFinite(options.targetBookCount, 4),
     agreementStdevCeiling: positiveFinite(options.agreementStdevCeiling, 0.06),
     methodStdevCeiling: positiveFinite(options.methodStdevCeiling, 0.02),
+    allowThreeWayPerOutcomeCalibration:
+      options.allowThreeWayPerOutcomeCalibration ?? false,
   }
 }
 
@@ -1471,8 +1673,25 @@ function bisectRoot(
   return (low + high) / 2
 }
 
-/** Cleans, normalizes, deduplicates, and validates one event's 2-way/3-way quotes. */
+/**
+ * Cleans, normalizes, deduplicates, and validates one event's 2-way/3-way h2h quotes.
+ *
+ * This engine deliberately fails closed for spreads, totals, and any point-bearing
+ * quote. Alternate lines must first be grouped by exact line identity and evaluated
+ * by a dedicated point-market model; mixing them here would manufacture false fair
+ * probabilities and false +EV signals.
+ */
 function prepareMarket(quotes: readonly OutcomeQuote[]): PreparedMarket | null {
+  if (
+    quotes.some(
+      (quote) =>
+        (quote.market !== undefined && quote.market !== "h2h") ||
+        quote.point !== undefined,
+    )
+  ) {
+    return null
+  }
+
   const outcomeLabels = new Map<string, string>()
   const books = new Map<string, PreparedBook>()
 
@@ -1560,7 +1779,52 @@ function calculateQuoteAgeSeconds(
   const updateMillis = parseIsoMillis(lastUpdate)
   const asOfMillis = parseIsoMillis(asOf)
   if (updateMillis === null || asOfMillis === null) return null
-  return Math.max(0, (asOfMillis - updateMillis) / 1000)
+  return (asOfMillis - updateMillis) / 1000
+}
+
+/** Absolute timing mismatch between a target quote and its weighted anchor. */
+function calculateTargetAnchorSkewSeconds(
+  targetAgeSeconds: number | null,
+  anchorAgeSeconds: number | null,
+): number | null {
+  if (targetAgeSeconds === null || anchorAgeSeconds === null) return null
+  return Math.abs(targetAgeSeconds - anchorAgeSeconds)
+}
+
+/** Applies a deterministic execution haircut that grows with age and time skew. */
+function calculateExecutionBuffer(
+  targetAgeSeconds: number | null,
+  targetAnchorSkewSeconds: number | null,
+  options: ResolvedEdgeOptions,
+): number {
+  const missingRisk = 1 - options.missingTimestampWeight
+  const ageRatio = targetAgeSeconds === null
+    ? missingRisk
+    : clamp(Math.max(0, targetAgeSeconds) / Math.max(1, options.maxTargetQuoteAgeSeconds), 0, 1)
+  const skewRatio = targetAnchorSkewSeconds === null
+    ? missingRisk
+    : clamp(targetAnchorSkewSeconds / Math.max(1, options.maxTargetAnchorSkewSeconds), 0, 1)
+
+  return (
+    options.executionBufferEv +
+    options.ageExecutionBufferEv * ageRatio +
+    options.skewExecutionBufferEv * skewRatio
+  )
+}
+
+/** Expected log-bankroll growth for one binary wager at a fixed stake fraction. */
+function calculateExpectedLogGrowth(
+  decimal: number,
+  probability: number,
+  stakeFraction: number,
+): number {
+  if (!isValidDecimal(decimal) || !isProbability(probability)) return 0
+  if (!Number.isFinite(stakeFraction) || stakeFraction <= 0 || stakeFraction >= 1) return 0
+  const winMultiplier = 1 + stakeFraction * (decimal - 1)
+  const lossMultiplier = 1 - stakeFraction
+  if (winMultiplier <= 0 || lossMultiplier <= 0) return 0
+  return probability * Math.log(winMultiplier) +
+    (1 - probability) * Math.log(lossMultiplier)
 }
 
 /** Time-to-event values without reading the system clock. */
@@ -1691,6 +1955,24 @@ function weightedPopulationStdev(
   return Math.sqrt(Math.max(0, variance))
 }
 
+/**
+ * Kish-style effective count after collapsing books in the same dependency
+ * bucket. This prevents a cluster of near-identical feeds from masquerading as
+ * many independent market opinions.
+ */
+function calculateCorrelationAdjustedBookCount(
+  books: readonly BookFairValue[],
+): number {
+  const groupWeights = new Map<string, number>()
+  for (const book of books) {
+    groupWeights.set(
+      book.correlationGroup,
+      (groupWeights.get(book.correlationGroup) ?? 0) + book.finalWeight,
+    )
+  }
+  return calculateEffectiveBookCount([...groupWeights.values()])
+}
+
 /** Kish-style effective sample size for nonnegative weights. */
 function calculateEffectiveBookCount(weights: readonly number[]): number {
   const total = sum(weights)
@@ -1745,6 +2027,8 @@ function getOutcomeLabel(prepared: PreparedMarket, index: number): string {
 /** Sorts actionable/high-net-EV quotes first with deterministic tie breakers. */
 function compareEvaluatedQuotes(left: EvaluatedQuote, right: EvaluatedQuote): number {
   if (left.isActionable !== right.isActionable) return left.isActionable ? -1 : 1
+  const growthDifference = right.expectedLogGrowth - left.expectedLogGrowth
+  if (Math.abs(growthDifference) > EPSILON) return growthDifference
   const netDifference = right.netEv - left.netEv
   if (Math.abs(netDifference) > EPSILON) return netDifference
   const confidenceDifference = right.confidence - left.confidence

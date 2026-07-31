@@ -65,6 +65,22 @@ export const config = {
         : "balanced") as "conservative" | "balanced" | "aggressive",
       requireTimestamps: env("EDGE_V2_REQUIRE_TIMESTAMPS") !== "false", // default on
     },
+    /**
+     * Middle-candidate engine (Edge V3). Middles are CANDIDATE-ONLY by default.
+     * Actionability additionally requires a real held-out per-sport/market
+     * calibrationId — never enable it on the generic model. Live spreads/totals
+     * polling is intentionally off by default to protect the credit budget.
+     */
+    middles: {
+      enabled: env("MIDDLES_ENABLED") === "true", // default OFF (quota control)
+      shadow: env("MIDDLES_SHADOW") !== "false", // default shadow
+      allowActionable: env("MIDDLES_ALLOW_ACTIONABLE") === "true", // never without calibrationId
+      calibrationId: env("MIDDLES_CALIBRATION_ID"),
+    },
+    /** Scheduled settlement/scores job (Edge V3). Off until wired + secured. */
+    settlement: {
+      enabled: env("SETTLEMENT_ENABLED") === "true", // default OFF
+    },
     get enabled() {
       return Boolean(this.key)
     },

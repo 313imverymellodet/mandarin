@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "./dist"
+  },
+  "comment": "Strict standalone check of the pure V3 engines only. App-glue modules (history/index/odds-api/telemetry) use @/ path aliases + the app tsconfig and are checked by `npm run typecheck`.",
+  "include": [
+    "lib/markets/arbitrage.ts",
+    "lib/markets/edge.ts",
+    "lib/markets/edge-history.ts",
+    "lib/markets/middles.ts",
+    "lib/markets/portfolio.ts",
+    "lib/markets/production-config.ts",
+    "lib/markets/settlement-math.ts",
+    "lib/markets/types.ts",
+    "lib/markets/*.test.ts",
+    "lib/markets/test-all.ts"
+  ]
+}

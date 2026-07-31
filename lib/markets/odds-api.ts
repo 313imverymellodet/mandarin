@@ -1,8 +1,9 @@
 import { config } from "@/lib/config"
-import { findBestLines, riskForEdge, decimalToImpliedPct, type OutcomeQuote } from "./arbitrage"
+import { findBestLines, findBestArbitrage, riskForEdge, decimalToImpliedPct, type OutcomeQuote, type ArbResult } from "./arbitrage"
 import { analyzePositiveEV, type EdgeOpportunity } from "./edge"
+import { buildProductionArbitrageOptions, buildProductionEdgeOptions } from "./production-config"
 import { recordEdgeTelemetry, type TelemetryEvent } from "./telemetry"
-import type { EdgeDTO, MarketCategory, OpportunityDTO, PlatformQuote } from "./types"
+import type { ArbitrageDTO, EdgeDTO, MarketCategory, OpportunityDTO, PlatformQuote } from "./types"
 
 /**
  * The Odds API (https://the-odds-api.com) aggregates decimal prices from
@@ -161,21 +162,21 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
     // excludes itself, so a book can never move its own benchmark.
     const v2 = config.oddsApi.v2
     const analysis = v2.enabled
-      ? analyzePositiveEV(anchorQuotes, {
-          riskProfile: v2.defaultProfile,
-          sharpBookmakers: config.oddsApi.sharpBooks,
-          eligibleBookmakers: config.oddsApi.books,
-          devigMethod: "power",
-          excludeTargetBookFromAnchor: true,
-          requireQuoteTimestamps: v2.requireTimestamps,
-          minConsensusBooks: config.oddsApi.edge.minConsensusBooks,
-          targetBookCount: config.oddsApi.edge.targetBookCount,
-          agreementStdevCeiling: config.oddsApi.edge.agreementStdevCeiling,
-          eventTime: event.commence_time,
-          asOf,
-        })
+      ? analyzePositiveEV(
+          anchorQuotes,
+          buildProductionEdgeOptions({
+            asOf,
+            eventTime: event.commence_time,
+            eligibleBookmakers: config.oddsApi.books,
+            sharpBookmakers: config.oddsApi.sharpBooks,
+          }),
+        )
       : null
     const edgeBest: EdgeOpportunity | null = analysis?.best ?? null
+
+    // V3 strict arbitrage: combination enumeration + freshness/skew gates +
+    // stressed-edge haircut on US-book quotes. Replaces the old edgePct>0 test.
+    const arbResult: ArbResult | null = findBestArbitrage(usQuotes, buildProductionArbitrageOptions(asOf))
 
     // Shadow telemetry: retain the full analysis (including rejected
     // evaluations) so the model can later be scored on closing-line value.
@@ -192,17 +193,18 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
     // Shadow mode computes V2 but withholds it from the public feed.
     const surfacedEdge = v2.enabled && !v2.shadowMode ? edgeBest : null
 
-    const isArb = lines.edgePct > 0
+    const isArb = arbResult !== null
     const kind: OpportunityDTO["kind"] = isArb ? "arbitrage" : surfacedEdge ? "positive_ev" : "watch"
 
     // Arbitrage keeps priority; +EV is displayed and retained but never labeled
     // as guaranteed profit.
     const suspect =
-      (isArb && lines.edgePct > config.oddsApi.maxBelievableEdge) ||
+      (isArb && arbResult.edgePct > config.oddsApi.maxBelievableEdge) ||
       (kind === "positive_ev" && surfacedEdge !== null && surfacedEdge.confidence < 55)
 
+    const hoursUntilArb = hoursUntil
     const riskLevel: OpportunityDTO["riskLevel"] = isArb
-      ? riskForEdge(lines.edgePct, hoursUntil)
+      ? riskForEdge(arbResult.edgePct, hoursUntilArb)
       : surfacedEdge
         ? surfacedEdge.confidence >= 70
           ? "medium"
@@ -210,8 +212,10 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
         : "low"
 
     const platforms: PlatformQuote[] = lines.legs.map((leg) => ({
+      key: leg.bookmaker,
       name: titleForBook(event, leg.bookmaker),
       outcome: leg.outcome,
+      market: "h2h",
       odds: Math.round(decimalToImpliedPct(leg.decimal) * 10) / 10,
       decimal: leg.decimal,
       updatedAt: leg.lastUpdate,
@@ -219,13 +223,43 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
     }))
 
     const round2 = (n: number) => Math.round(n * 100) / 100
-    const edge: EdgeDTO | undefined = surfacedEdge
+
+    // ArbitrageDTO v2 — exact legs + stressed edge. "Guaranteed" language is only
+    // valid after a live re-validation just before placement (validateArbitrageExecution).
+    const arb: ArbitrageDTO | undefined = arbResult
       ? {
           version: 2,
+          market: arbResult.market,
+          lineKey: arbResult.lineKey,
+          totalImpliedProbability: round2(arbResult.impliedProbabilitySum),
+          edgePct: round2(arbResult.edgePct),
+          stressedEdgePct: round2(arbResult.stressedEdgePct),
+          guaranteedReturnMultiple: Math.round(arbResult.guaranteedReturnMultiple * 1e4) / 1e4,
+          guaranteedRoiPct: round2(arbResult.guaranteedRoiPct),
+          quoteSkewSeconds: arbResult.quoteSkewSeconds,
+          oldestQuoteAgeSeconds: arbResult.oldestQuoteAgeSeconds,
+          legs: arbResult.legs.map((leg) => ({
+            bookmaker: titleForBook(event, leg.bookmaker),
+            bookmakerKey: leg.bookmaker,
+            outcome: leg.outcome,
+            decimal: leg.decimal,
+            ...(leg.point !== undefined ? { point: leg.point } : {}),
+            stakeFraction: 0, // filled by buildArbitrageStakePlan when a bankroll is entered
+            ...(leg.lastUpdate ? { updatedAt: leg.lastUpdate } : {}),
+            url: bookUrl(leg.bookmaker),
+          })),
+        }
+      : undefined
+
+    // EdgeDTO v3 — headline is netEvPct; raw EV is diagnostic only.
+    const edge: EdgeDTO | undefined = surfacedEdge
+      ? {
+          version: 3,
           profile: v2.defaultProfile,
           market: "h2h",
           outcome: surfacedEdge.outcome,
           bookmaker: titleForBook(event, surfacedEdge.bookmaker),
+          bookmakerKey: surfacedEdge.bookmaker,
           decimal: surfacedEdge.decimal,
           fairDecimal: round2(surfacedEdge.fairDecimal),
           fairProbability: surfacedEdge.fairProbability,
@@ -234,6 +268,9 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
           rawEvPct: round2(surfacedEdge.evPct),
           conservativeEvPct: round2(surfacedEdge.conservativeEvPct),
           netEvPct: round2(surfacedEdge.netEvPct),
+          executionBufferEvPct: round2(surfacedEdge.executionBufferEvAppliedPct),
+          executionAdjustedProbability: surfacedEdge.executionAdjustedProbability,
+          expectedLogGrowth: surfacedEdge.expectedLogGrowth,
           confidence: surfacedEdge.confidence,
           kellyStakeFraction: surfacedEdge.kellyStakeFraction,
           anchorSource: surfacedEdge.anchorSource,
@@ -241,6 +278,9 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
           anchorBookmakers: surfacedEdge.anchorBookmakers.map((k) => titleForBook(event, k)),
           effectiveBookCount: surfacedEdge.effectiveBookCount,
           targetQuoteAgeSeconds: surfacedEdge.targetQuoteAgeSeconds,
+          targetAnchorSkewSeconds: surfacedEdge.targetAnchorSkewSeconds,
+          isActionable: surfacedEdge.isActionable,
+          rejectionReasons: surfacedEdge.rejectionReasons,
           ...(surfacedEdge.lastUpdate ? { updatedAt: surfacedEdge.lastUpdate } : {}),
         }
       : undefined
@@ -250,12 +290,15 @@ async function fetchSportArbs(sportKey: string): Promise<OpportunityDTO[]> {
       matchup: `${event.away_team} @ ${event.home_team}`,
       league: leagueLabel(event.sport_key, event.sport_title),
       category: categoryForSport(event.sport_key),
+      market: "h2h",
       platforms,
-      arbitrage: lines.edgePct,
+      arbitrage: arbResult ? arbResult.edgePct : lines.edgePct,
       kind,
+      ...(arb ? { arb } : {}),
       ...(edge ? { edge } : {}),
       suspect,
       riskLevel,
+      observedAt: asOf,
       eventTime: eventTime.toISOString(),
       lastUpdated: asOf,
     })
