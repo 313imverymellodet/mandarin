@@ -81,7 +81,10 @@ export async function runSettlement(): Promise<SettlementResult> {
     url.searchParams.set("daysFrom", "3")
     try {
       const res = await fetch(url, { cache: "no-store" })
-      requestsRemaining = Number(res.headers.get("x-requests-remaining") ?? requestsRemaining)
+      const remainingHeader = res.headers.get("x-requests-remaining")
+      if (remainingHeader !== null && Number.isFinite(Number(remainingHeader))) {
+        requestsRemaining = Number(remainingHeader)
+      }
       console.log(
         `settlement scores ${sportKey}: status=${res.status} used=${res.headers.get("x-requests-used")} remaining=${res.headers.get("x-requests-remaining")} last=${res.headers.get("x-requests-last")}`,
       )

@@ -73,18 +73,27 @@ export async function GET() {
 
   // Performance: only computed from settled signals, and reported only when
   // there are enough of them to mean anything. No claim without data.
-  const closing = await loadClosingProbs(admin, [...new Set(settled.map((r) => r.event_id as string))])
-  const settledRecords: SettledEdgeRecord[] = settled
-    .filter((r) => typeof r.fair_probability === "number" && typeof r.decimal_odds === "number")
-    .map((r) => {
-      const clv = closing.get(`${r.event_id}::${(r.outcome as string).toLowerCase()}`)
-      return {
-        fairProbability: r.fair_probability as number,
-        decimalTaken: r.decimal_odds as number,
-        won: r.won as boolean,
-        ...(clv !== undefined ? { closingFairProbability: clv } : {}),
-      }
-    })
+  //
+  // A persistent signal is stored once per poll, so `settled` holds many rows
+  // for the same wager. Dedupe to ONE position per (event, book, outcome) —
+  // otherwise CLV/Brier/ROI would over-count frequently-observed signals. Rows
+  // arrive newest-first; we keep the earliest observation as the entry price.
+  const positions = new Map<string, (typeof settled)[number]>()
+  for (const r of settled) {
+    if (typeof r.fair_probability !== "number" || typeof r.decimal_odds !== "number") continue
+    const key = `${r.event_id}::${(r.bookmaker as string).toLowerCase()}::${(r.outcome as string).toLowerCase()}`
+    positions.set(key, r) // last write wins → oldest row (earliest entry)
+  }
+  const closing = await loadClosingProbs(admin, [...new Set([...positions.values()].map((r) => r.event_id as string))])
+  const settledRecords: SettledEdgeRecord[] = [...positions.values()].map((r) => {
+    const clv = closing.get(`${r.event_id}::${(r.outcome as string).toLowerCase()}`)
+    return {
+      fairProbability: r.fair_probability as number,
+      decimalTaken: r.decimal_odds as number,
+      won: r.won as boolean,
+      ...(clv !== undefined ? { closingFairProbability: clv } : {}),
+    }
+  })
   const MIN_FOR_STATS = 30
   const performance =
     settledRecords.length >= MIN_FOR_STATS
