@@ -115,6 +115,11 @@ export const config = {
   site: {
     url: env("NEXT_PUBLIC_SITE_URL") ?? "http://localhost:3000",
   },
+  // Emails allowed to read internal admin endpoints. Empty = nobody.
+  adminEmails: (env("ADMIN_EMAILS") ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
   // How long the server caches aggregated opportunities before refetching
   // upstream APIs. Protects the Odds API quota (free tier is ~500 req/mo).
   cacheTtlMs: Number(env("MARKET_CACHE_TTL_MS") ?? 60_000),

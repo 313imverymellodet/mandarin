@@ -21,13 +21,23 @@ interface CacheEntry<T> {
 }
 
 const cache = new Map<string, CacheEntry<unknown>>()
+// Loads in progress, so concurrent misses share one upstream fetch instead of
+// each spending quota (one credit per sport) on the same refresh.
+const inflight = new Map<string, Promise<unknown>>()
 
 async function cached<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
   const hit = cache.get(key) as CacheEntry<T> | undefined
   if (hit && hit.expires > Date.now()) return hit.value
-  const value = await loader()
-  cache.set(key, { value, expires: Date.now() + ttlMs })
-  return value
+  const pending = inflight.get(key) as Promise<T> | undefined
+  if (pending) return pending
+  const load = loader()
+    .then((value) => {
+      cache.set(key, { value, expires: Date.now() + ttlMs })
+      return value
+    })
+    .finally(() => inflight.delete(key))
+  inflight.set(key, load)
+  return load
 }
 
 export async function getOpportunities(): Promise<OpportunitiesResponse> {

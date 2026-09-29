@@ -44,7 +44,11 @@ export async function POST(request: Request) {
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
-        const sub = event.data.object as Stripe.Subscription
+        // Stripe doesn't guarantee delivery order, so re-read the live object
+        // rather than trusting the (possibly stale) event payload.
+        const payload = event.data.object as Stripe.Subscription
+        const sub =
+          event.type === "customer.subscription.deleted" ? payload : await stripe.subscriptions.retrieve(payload.id)
         await syncSubscription(stripe, sub)
         break
       }
@@ -65,11 +69,10 @@ async function syncSubscription(
   subscription: Stripe.Subscription,
   fallbackUserId?: string | null,
 ) {
+  // Throw on every failure below: the handler turns it into a 500 so Stripe
+  // retries instead of the paid user silently never getting their plan.
   const admin = createAdminClient()
-  if (!admin) {
-    console.error("Cannot sync subscription: SUPABASE_SERVICE_ROLE_KEY not set.")
-    return
-  }
+  if (!admin) throw new Error("Cannot sync subscription: SUPABASE_SERVICE_ROLE_KEY not set.")
 
   const userId = subscription.metadata?.user_id ?? fallbackUserId
   const item = subscription.items.data[0]
@@ -92,9 +95,8 @@ async function syncSubscription(
 
   // Prefer keying by user_id (unique). If we don't have it (e.g. a raw
   // subscription.updated without metadata), fall back to the customer id.
-  if (userId) {
-    await admin.from("subscriptions").upsert({ user_id: userId, ...row }, { onConflict: "user_id" })
-  } else {
-    await admin.from("subscriptions").update(row).eq("stripe_customer_id", row.stripe_customer_id)
-  }
+  const { error } = userId
+    ? await admin.from("subscriptions").upsert({ user_id: userId, ...row }, { onConflict: "user_id" })
+    : await admin.from("subscriptions").update(row).eq("stripe_customer_id", row.stripe_customer_id)
+  if (error) throw new Error(`subscriptions write failed: ${error.message}`)
 }
