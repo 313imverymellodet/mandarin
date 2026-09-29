@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getStripe, priceForPlan } from "@/lib/stripe"
 import { getCurrentUser, createClient } from "@/lib/supabase/server"
 import { config } from "@/lib/config"
+import { isSubscriptionActive, type Subscription } from "@/lib/subscription"
 
 export const dynamic = "force-dynamic"
 
@@ -28,9 +29,17 @@ export async function POST(request: Request) {
   if (supabase) {
     const { data } = await supabase
       .from("subscriptions")
-      .select("stripe_customer_id")
+      .select("stripe_customer_id, status")
       .eq("user_id", user.id)
       .maybeSingle()
+    // A second Checkout would create a second, double-billed subscription.
+    // Plan changes go through the billing portal instead.
+    if (isSubscriptionActive(data as Subscription | null)) {
+      return NextResponse.json(
+        { error: "You already have an active plan. Manage it from your account page." },
+        { status: 409 },
+      )
+    }
     customerId = data?.stripe_customer_id ?? undefined
   }
 

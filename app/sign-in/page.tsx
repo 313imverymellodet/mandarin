@@ -11,11 +11,12 @@ import { Label } from "@/components/ui/label"
 import { MandarinLogo } from "@/components/mandarin-logo"
 import { ArrowLeft, Eye, EyeOff, Mail, Lock, AlertCircle } from "lucide-react"
 import { signInWithPassword, signInWithOAuth } from "@/app/auth/actions"
+import { safeRedirectPath } from "@/lib/safe-redirect"
 
 function SignInForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const redirectTo = searchParams.get("redirectTo") ?? "/arbitrage"
+  const redirectTo = safeRedirectPath(searchParams.get("redirectTo"))
 
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)

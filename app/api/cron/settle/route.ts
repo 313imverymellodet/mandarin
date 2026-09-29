@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto"
 import { NextResponse } from "next/server"
 import { runSettlement } from "@/lib/markets/settlement"
 
@@ -5,16 +6,18 @@ export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
 /**
- * Scheduled settlement. Protected by CRON_SECRET (or Vercel's own cron header).
+ * Scheduled settlement. Protected by CRON_SECRET: Vercel Cron sends it
+ * automatically as `Authorization: Bearer <CRON_SECRET>` once the env var is
+ * set. Do NOT trust `x-vercel-cron` — any client can send that header.
  * Idempotent — safe to retry. Add to vercel.json crons, e.g. every 6 hours:
  *   { "path": "/api/cron/settle", "schedule": "0 *​/6 * * *" }
  */
 function authorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET
-  // Vercel Cron sends this header; a manual trigger uses the bearer secret.
-  if (request.headers.get("x-vercel-cron") === "1") return true
   if (!secret) return false
-  return request.headers.get("authorization") === `Bearer ${secret}`
+  const expected = Buffer.from(`Bearer ${secret}`)
+  const received = Buffer.from(request.headers.get("authorization") ?? "")
+  return received.length === expected.length && timingSafeEqual(received, expected)
 }
 
 export async function GET(request: Request) {

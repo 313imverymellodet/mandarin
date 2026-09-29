@@ -21,6 +21,8 @@
     "lib/markets/settlement-math.ts",
     "lib/markets/types.ts",
     "lib/markets/*.test.ts",
-    "lib/markets/test-all.ts"
+    "lib/markets/test-all.ts",
+    "lib/safe-redirect.ts",
+    "lib/safe-redirect.test.ts"
   ]
 }

@@ -8,3 +8,10 @@ node_modules
 .next/
 .env*.local
 .DS_Store
+# Local env files (only the example is committed)
+.env
+.env.*
+!.env.example
+
+# TypeScript incremental build info
+*.tsbuildinfo

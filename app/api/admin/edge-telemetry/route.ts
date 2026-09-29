@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/supabase/server"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { config } from "@/lib/config"
 import { summarizeEdgeBacktest, buildCalibrationBins, type SettledEdgeRecord } from "@/lib/markets/edge-history"
 
 /** Latest closing fair probability per (event, outcome) before commence time. */
@@ -27,13 +28,17 @@ export const dynamic = "force-dynamic"
 
 /**
  * Internal shadow-telemetry summary: what the V2 engine is collecting, and why
- * candidate edges are being rejected. Read-only, requires an authenticated
- * session. This reports collection coverage only — it makes no performance
+ * candidate edges are being rejected. Read-only, restricted to ADMIN_EMAILS.
+ * This reports collection coverage only — it makes no performance
  * claim, and CLV/calibration require settled results.
  */
 export async function GET() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Sign in required." }, { status: 401 })
+  // Service-role read of internal model data: admins only, fail closed.
+  if (!user.email || !config.adminEmails.includes(user.email.toLowerCase())) {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 })
+  }
 
   const admin = createAdminClient()
   if (!admin) {

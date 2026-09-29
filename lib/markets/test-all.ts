@@ -11,5 +11,6 @@ import "./edge-history.test"
 import "./portfolio.test"
 import "./production-config.test"
 import "./invariants.test"
+import "../safe-redirect.test"
 
 console.log("test-all.ts: every Mandarin market-engine assertion passed")
