@@ -1,13 +1,22 @@
+import type { Metadata } from "next"
 import { Header } from "@/components/header"
 import { WarningBanner } from "@/components/warning-banner"
 import { MarketTicker } from "@/components/market-ticker"
 import { HeroSection } from "@/components/hero-section"
 import { ArbitrageCards } from "@/components/arbitrage-cards"
 import { HowItWorks } from "@/components/how-it-works"
+import { JsonLd } from "@/components/json-ld"
+import { SiteFooter } from "@/components/site-footer"
+import { organizationJsonLd, websiteJsonLd } from "@/lib/seo"
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+}
 
 export default function Home() {
   return (
     <div className="min-h-screen bg-background">
+      <JsonLd data={[organizationJsonLd, websiteJsonLd]} />
       <WarningBanner />
       <Header />
       <MarketTicker />
@@ -18,6 +27,7 @@ export default function Home() {
         </div>
         <HowItWorks />
       </main>
+      <SiteFooter />
     </div>
   )
 }

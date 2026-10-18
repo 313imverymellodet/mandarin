@@ -2,13 +2,54 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { JsonLd } from "@/components/json-ld"
 import { MandarinLogo } from "@/components/mandarin-logo"
+import { SiteFooter } from "@/components/site-footer"
+import { pageMetadata, SITE_URL } from "@/lib/seo"
 import { ArrowLeft, ArrowRight, ScanSearch, Scissors, Target, ShieldCheck, Zap, AlertTriangle } from "lucide-react"
 
-export const metadata: Metadata = {
-  title: "How Mandarin works — finding a real betting edge",
-  description:
-    "How Mandarin strips the vig off a sharp line to find the true odds, then flags books paying more than they should. Arbitrage vs positive EV, explained plainly.",
+const PAGE_TITLE = "How Mandarin works — finding a real betting edge"
+const PAGE_DESCRIPTION =
+  "How Mandarin strips the vig off a sharp line to find the true odds, then flags books paying more than they should. Arbitrage vs positive EV, explained plainly."
+
+export const metadata: Metadata = pageMetadata({
+  title: PAGE_TITLE,
+  description: PAGE_DESCRIPTION,
+  path: "/how-it-works",
+  absoluteTitle: true,
+})
+
+const steps = [
+  {
+    icon: ScanSearch,
+    title: "Read the sharpest line",
+    body: "Pinnacle is the book professionals bet into. It takes sharp money and moves fast, which makes its prices the closest thing to the real odds.",
+  },
+  {
+    icon: Scissors,
+    title: "Cut out the vig",
+    body: "We remove the fee from that line to get the fair probability — what the outcome is actually worth, with no house cut.",
+  },
+  {
+    icon: Target,
+    title: "Find who's paying too much",
+    body: "We compare every book you can bet at against that fair probability. Anyone paying more than the true odds is handing you an edge.",
+  },
+]
+
+const howToJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "HowTo",
+  name: PAGE_TITLE,
+  description: PAGE_DESCRIPTION,
+  url: `${SITE_URL}/how-it-works`,
+  step: steps.map((step, index) => ({
+    "@type": "HowToStep",
+    position: index + 1,
+    name: step.title,
+    text: step.body,
+    url: `${SITE_URL}/how-it-works#step-${index + 1}`,
+  })),
 }
 
 const glossary: { term: string; definition: string }[] = [
@@ -82,6 +123,7 @@ export default function HowItWorksPage() {
         </div>
       </header>
 
+      <JsonLd data={howToJsonLd} />
       <main className="container mx-auto max-w-3xl px-4 py-12 sm:py-16">
         {/* Hero */}
         <div className="mb-14 text-center">
@@ -89,6 +131,12 @@ export default function HowItWorksPage() {
           <p className="mx-auto mt-4 max-w-2xl text-pretty text-lg leading-relaxed text-muted-foreground">
             Sportsbooks aren&apos;t oracles — they&apos;re businesses with a fee baked into every price. Mandarin does one
             thing: work out what the <em>real</em> odds are, then find books paying more than they should.
+          </p>
+          <p className="mt-4 text-sm text-muted-foreground">
+            New to the idea itself?{" "}
+            <Link href="/what-is-arbitrage-betting" className="font-medium text-orange-600 hover:text-orange-700 dark:text-orange-400">
+              What is arbitrage betting?
+            </Link>
           </p>
         </div>
 
@@ -101,24 +149,8 @@ export default function HowItWorksPage() {
           </p>
 
           <ol className="space-y-3">
-            {[
-              {
-                icon: ScanSearch,
-                title: "Read the sharpest line",
-                body: "Pinnacle is the book professionals bet into. It takes sharp money and moves fast, which makes its prices the closest thing to the real odds.",
-              },
-              {
-                icon: Scissors,
-                title: "Cut out the vig",
-                body: "We remove the fee from that line to get the fair probability — what the outcome is actually worth, with no house cut.",
-              },
-              {
-                icon: Target,
-                title: "Find who's paying too much",
-                body: "We compare every book you can bet at against that fair probability. Anyone paying more than the true odds is handing you an edge.",
-              },
-            ].map((step, i) => (
-              <li key={step.title} className="flex gap-4 rounded-xl border border-border bg-card p-4">
+            {steps.map((step, i) => (
+              <li id={`step-${i + 1}`} key={step.title} className="flex gap-4 rounded-xl border border-border bg-card p-4">
                 <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-orange-500/10">
                   <step.icon className="h-4.5 w-4.5 text-orange-500" aria-hidden="true" />
                 </div>
@@ -287,6 +319,7 @@ export default function HowItWorksPage() {
           </Button>
         </div>
       </main>
+      <SiteFooter />
     </div>
   )
 }

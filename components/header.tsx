@@ -30,6 +30,12 @@ export function Header() {
             <Link href="/arbitrage" className="text-sm font-medium transition-colors hover:text-orange-500">
               Dashboard
             </Link>
+            <Link href="/how-it-works" className="text-sm font-medium transition-colors hover:text-orange-500">
+              How it works
+            </Link>
+            <Link href="/what-is-arbitrage-betting" className="text-sm font-medium transition-colors hover:text-orange-500">
+              Arbitrage betting
+            </Link>
             {paymentsEnabled && (
               <Link href="/pricing" className="text-sm font-medium transition-colors hover:text-orange-500">
                 Pricing
@@ -70,6 +76,12 @@ export function Header() {
         <nav id="mobile-navigation" className="flex flex-col gap-3 border-t border-border bg-background px-4 py-4 md:hidden" aria-label="Mobile navigation">
           <Link href="/arbitrage" onClick={closeMenu} className="text-sm font-medium transition-colors hover:text-orange-500">
             Dashboard
+          </Link>
+          <Link href="/how-it-works" onClick={closeMenu} className="text-sm font-medium transition-colors hover:text-orange-500">
+            How it works
+          </Link>
+          <Link href="/what-is-arbitrage-betting" onClick={closeMenu} className="text-sm font-medium transition-colors hover:text-orange-500">
+            Arbitrage betting
           </Link>
           {paymentsEnabled && (
             <Link href="/pricing" onClick={closeMenu} className="text-sm font-medium transition-colors hover:text-orange-500">

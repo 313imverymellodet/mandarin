@@ -56,6 +56,14 @@ export function HowItWorks() {
             See the full breakdown — with a worked example and every term explained
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Link>
+          <p className="mt-3">
+            <Link
+              href="/what-is-arbitrage-betting"
+              className="text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              What is arbitrage betting?
+            </Link>
+          </p>
           <p className="mx-auto mt-6 max-w-2xl text-xs text-muted-foreground">
             Positive EV pays off over many bets, not any single one — you will lose some. Arbitrage is rare and fleeting, and
             odds move between refresh and placement. Always verify on the venue before staking. Informational only, not
