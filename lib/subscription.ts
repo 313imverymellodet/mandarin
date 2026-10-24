@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server"
+import { getPool } from "@/lib/db"
+import { getCurrentUser } from "@/lib/session"
 
 export interface Subscription {
   plan: string | null
@@ -10,23 +11,27 @@ export interface Subscription {
 
 const ACTIVE_STATUSES = new Set(["active", "trialing"])
 
-/** Fetch the current user's subscription row (RLS restricts to the owner). */
+/** Fetch the signed-in user's subscription row. */
 export async function getSubscription(): Promise<Subscription | null> {
-  const supabase = await createClient()
-  if (!supabase) return null
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) return null
+  return getSubscriptionForUser(user.id)
+}
 
-  const { data } = await supabase
-    .from("subscriptions")
-    .select("plan, status, current_period_end, cancel_at_period_end, stripe_customer_id")
-    .eq("user_id", user.id)
-    .maybeSingle()
-
-  return (data as Subscription) ?? null
+export async function getSubscriptionForUser(userId: string): Promise<Subscription | null> {
+  const pool = getPool()
+  if (!pool) return null
+  try {
+    const { rows } = await pool.query<Subscription>(
+      `select plan, status, current_period_end, cancel_at_period_end, stripe_customer_id
+         from subscriptions where user_id = $1 limit 1`,
+      [userId],
+    )
+    return rows[0] ?? null
+  } catch (error) {
+    console.error("subscription lookup failed:", error instanceof Error ? error.message : error)
+    return null
+  }
 }
 
 export function isSubscriptionActive(sub: Subscription | null): boolean {

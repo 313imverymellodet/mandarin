@@ -92,12 +92,24 @@ export const config = {
       return [...new Set([...this.sharpBooks, ...this.books])].slice(0, 10)
     },
   },
-  supabase: {
-    url: env("NEXT_PUBLIC_SUPABASE_URL"),
-    anonKey: env("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-    serviceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY"),
+  // Postgres on Railway. Server-only: never prefix with NEXT_PUBLIC_.
+  database: {
+    url: env("DATABASE_URL"),
     get enabled() {
-      return Boolean(this.url && this.anonKey)
+      return Boolean(this.url)
+    },
+  },
+  // Better Auth (email + password, optional Google/GitHub), stored in Postgres.
+  auth: {
+    secret: env("BETTER_AUTH_SECRET"),
+    google: { clientId: env("GOOGLE_CLIENT_ID"), clientSecret: env("GOOGLE_CLIENT_SECRET") },
+    github: { clientId: env("GITHUB_CLIENT_ID"), clientSecret: env("GITHUB_CLIENT_SECRET") },
+    // Optional: send password-reset emails via Resend. Without it the reset
+    // link is written to the server log so an admin can pass it along.
+    resendApiKey: env("RESEND_API_KEY"),
+    emailFrom: env("EMAIL_FROM") ?? "Mandarin <onboarding@resend.dev>",
+    get enabled() {
+      return Boolean(env("DATABASE_URL") && this.secret)
     },
   },
   stripe: {

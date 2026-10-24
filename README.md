@@ -11,7 +11,8 @@ outcomes locks in a guaranteed return.
 
 - **Next.js 16** (App Router) + React 19 + TypeScript
 - **Tailwind CSS v4** + Radix UI
-- **Supabase** — auth + subscription storage
+- **Railway Postgres** — accounts, subscriptions, odds history and engine telemetry
+- **Better Auth** — email/password sign-in (optional Google/GitHub), sessions stored in Postgres
 - **Stripe** — Checkout + billing portal
 - Market data: **The Odds API** (live US sportsbook odds; powers both the dashboard and ticker)
 
@@ -24,8 +25,9 @@ outcomes locks in a guaranteed return.
 | Aggregation + cache | `lib/markets/index.ts` | Short-TTL in-process cache protects the Odds API quota. |
 | API routes | `app/api/opportunities`, `app/api/markets/ticker` | JSON consumed by the client hook. |
 | Live feed | `hooks/use-odds-websocket.ts` | Polls the API, diffs results to highlight new/updated rows. |
-| Auth | `lib/supabase/*`, `middleware.ts`, `app/auth/*` | SSR sessions; `/arbitrage` and `/account` are protected. |
-| Payments | `lib/stripe.ts`, `app/api/stripe/*` | Checkout → webhook → subscription row in Supabase. |
+| Database | `lib/db.ts`, `db/schema.sql`, `scripts/db-migrate.ts` | One server-only `pg` pool; `npm run db:migrate` creates every table. |
+| Auth | `lib/auth.ts`, `lib/session.ts`, `proxy.ts`, `app/auth/*`, `app/api/auth/[...all]` | Better Auth sessions; `/arbitrage` and `/account` are protected. |
+| Payments | `lib/stripe.ts`, `app/api/stripe/*` | Checkout → webhook → subscription row in Postgres. |
 
 Every integration is **optional**. With no keys the app still builds and runs; each
 feature activates when its keys are present (see `lib/config.ts`).
@@ -43,11 +45,12 @@ npm run dev
 2. Set `ODDS_API_KEY`. Tune `ODDS_API_SPORTS` / `ODDS_API_REGIONS` to control quota use.
 3. Both the dashboard and the live ticker are served from this one cached source.
 
-### 2. Auth (Supabase)
-1. Create a project at <https://supabase.com>.
-2. Run `supabase/schema.sql` in the SQL editor (creates `profiles`, `subscriptions`, RLS, and the new-user trigger).
-3. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
-4. In Auth → URL Configuration, add `${SITE_URL}/auth/callback` as a redirect URL. For Google/GitHub, enable those providers.
+### 2. Database + auth (Railway)
+1. On <https://railway.com>, create a project and add a **PostgreSQL** service.
+2. Copy its connection string into `DATABASE_URL` — use `DATABASE_PUBLIC_URL` when the app runs outside Railway (e.g. Vercel).
+3. Set `BETTER_AUTH_SECRET` to a long random string (`openssl rand -base64 32`).
+4. Run `npm run db:migrate` once (safe to re-run) — creates the auth tables (`user`, `session`, `account`, `verification`) and the app tables.
+5. Optional: `RESEND_API_KEY` for password-reset emails (otherwise the reset link is logged server-side), and Google/GitHub client IDs for social sign-in — callback URL is `${SITE_URL}/api/auth/callback/<provider>`.
 
 ### 3. Payments (Stripe)
 1. Create two recurring Products (Pro, Team); copy their Price IDs into `STRIPE_PRICE_PRO` / `STRIPE_PRICE_TEAM`.

@@ -1,4 +1,4 @@
-import { createAdminClient } from "@/lib/supabase/admin"
+import { getPool, insertRows } from "@/lib/db"
 import { config } from "@/lib/config"
 import type { EdgeAnalysis } from "./edge"
 
@@ -39,8 +39,8 @@ function bucketIso(iso: string, bucketMs: number): string {
  * this in a way that can fail the request.
  */
 export function recordEdgeTelemetry(sportKey: string, asOf: string, events: readonly TelemetryEvent[]): void {
-  const admin = createAdminClient()
-  if (!admin || events.length === 0) return
+  const pool = getPool()
+  if (!pool || events.length === 0) return
 
   const profile = config.oddsApi.v2.defaultProfile
   const signalRows: Record<string, unknown>[] = []
@@ -111,41 +111,37 @@ export function recordEdgeTelemetry(sportKey: string, asOf: string, events: read
     count,
   }))
 
-  const swallow = (label: string) => (result: { error: { message: string } | null }) => {
-    if (result.error) console.error(`edge telemetry (${label}) failed:`, result.error.message)
-  }
+  const swallow = (label: string) => (error: unknown) =>
+    console.error(`edge telemetry (${label}) failed:`, error instanceof Error ? error.message : error)
 
   if (signalRows.length > 0) {
-    void admin
-      .from("edge_signals")
-      .upsert(signalRows, { onConflict: "event_id,market,bookmaker,outcome,observed_at", ignoreDuplicates: true })
-      .then(swallow("signals"))
+    void insertRows("edge_signals", Object.keys(signalRows[0]!), signalRows, {
+      target: ["event_id", "market", "bookmaker", "outcome", "observed_at"],
+      action: "nothing",
+    }).catch(swallow("signals"))
   }
   if (fairProbRows.length > 0) {
-    void admin
-      .from("market_fair_probs")
-      .upsert(fairProbRows, { onConflict: "event_id,market,outcome,observed_at", ignoreDuplicates: true })
-      .then(swallow("fair_probs"))
+    void insertRows("market_fair_probs", Object.keys(fairProbRows[0]!), fairProbRows, {
+      target: ["event_id", "market", "outcome", "observed_at"],
+      action: "nothing",
+    }).catch(swallow("fair_probs"))
   }
   if (rejectionRows.length > 0) {
-    void admin
-      .from("edge_rejections")
-      .upsert(rejectionRows, { onConflict: "observed_at,sport_key,reason", ignoreDuplicates: true })
-      .then(swallow("rejections"))
+    void insertRows("edge_rejections", ["observed_at", "sport_key", "reason", "count"], rejectionRows, {
+      target: ["observed_at", "sport_key", "reason"],
+      action: "nothing",
+    }).catch(swallow("rejections"))
   }
 
   // Occasional retention pruning so the free tier stays healthy.
   if (Math.random() < 0.02) {
     const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
-    void admin.from("market_fair_probs").delete().lt("observed_at", cutoff).then(() => undefined)
-    void admin.from("edge_rejections").delete().lt("observed_at", cutoff).then(() => undefined)
+    void pool.query("delete from market_fair_probs where observed_at < $1", [cutoff]).catch(() => undefined)
+    void pool.query("delete from edge_rejections where observed_at < $1", [cutoff]).catch(() => undefined)
     // edge_signals are the training set — keep settled ones, prune only stale
     // unsettled rows whose event is long past.
-    void admin
-      .from("edge_signals")
-      .delete()
-      .is("won", null)
-      .lt("commence_time", cutoff)
-      .then(() => undefined)
+    void pool
+      .query("delete from edge_signals where won is null and commence_time < $1", [cutoff])
+      .catch(() => undefined)
   }
 }

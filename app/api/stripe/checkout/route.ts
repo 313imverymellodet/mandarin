@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getStripe, priceForPlan } from "@/lib/stripe"
-import { getCurrentUser, createClient } from "@/lib/supabase/server"
+import { getCurrentUser } from "@/lib/session"
+import { getSubscriptionForUser } from "@/lib/subscription"
 import { config } from "@/lib/config"
 
 export const dynamic = "force-dynamic"
@@ -23,16 +24,7 @@ export async function POST(request: Request) {
   }
 
   // Reuse an existing Stripe customer if we've already created one.
-  const supabase = await createClient()
-  let customerId: string | undefined
-  if (supabase) {
-    const { data } = await supabase
-      .from("subscriptions")
-      .select("stripe_customer_id")
-      .eq("user_id", user.id)
-      .maybeSingle()
-    customerId = data?.stripe_customer_id ?? undefined
-  }
+  const customerId = (await getSubscriptionForUser(user.id))?.stripe_customer_id ?? undefined
 
   try {
     const session = await stripe.checkout.sessions.create({

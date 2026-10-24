@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getStripe } from "@/lib/stripe"
-import { getCurrentUser, createClient } from "@/lib/supabase/server"
+import { getCurrentUser } from "@/lib/session"
+import { getSubscriptionForUser } from "@/lib/subscription"
 import { config } from "@/lib/config"
 
 export const dynamic = "force-dynamic"
@@ -13,12 +14,7 @@ export async function POST() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "You must be signed in." }, { status: 401 })
 
-  const supabase = await createClient()
-  const { data } = supabase
-    ? await supabase.from("subscriptions").select("stripe_customer_id").eq("user_id", user.id).maybeSingle()
-    : { data: null }
-
-  const customerId = data?.stripe_customer_id
+  const customerId = (await getSubscriptionForUser(user.id))?.stripe_customer_id
   if (!customerId) return NextResponse.json({ error: "No billing account found yet." }, { status: 404 })
 
   try {

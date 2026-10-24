@@ -4,10 +4,10 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { createClient } from "@/lib/supabase/client"
 import { AlertCircle, Check } from "lucide-react"
 
 export function UpdatePasswordForm() {
+  const [currentPassword, setCurrentPassword] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -21,21 +21,43 @@ export function UpdatePasswordForm() {
     }
     setError(null)
     setIsLoading(true)
+    setDone(false)
+    // Call the auth endpoint directly (not a server action): revoking other
+    // sessions issues a new session cookie, and a server action would
+    // re-render this page with the old, now-revoked cookie and sign you out.
     try {
-      const supabase = createClient()
-      const { error } = await supabase.auth.updateUser({ password })
-      if (error) throw error
-      setDone(true)
-      setPassword("")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't update password.")
-    } finally {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword: password, revokeOtherSessions: true }),
+      })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { message?: string }
+        setError(data.message ?? "Couldn't update password.")
+        setIsLoading(false)
+        return
+      }
+    } catch {
+      setError("Couldn't update password.")
       setIsLoading(false)
+      return
     }
+    setIsLoading(false)
+    setDone(true)
+    setCurrentPassword("")
+    setPassword("")
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
+      <Label htmlFor="current-password">Current password</Label>
+      <Input
+        id="current-password"
+        type="password"
+        value={currentPassword}
+        onChange={(e) => setCurrentPassword(e.target.value)}
+        autoComplete="current-password"
+      />
       <Label htmlFor="new-password">New password</Label>
       <Input
         id="new-password"
