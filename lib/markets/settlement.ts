@@ -1,5 +1,5 @@
 import { config } from "@/lib/config"
-import { createAdminClient } from "@/lib/supabase/admin"
+import { getPool } from "@/lib/db"
 import { settleH2HWager, parseScore, type FinalScore } from "./settlement-math"
 
 /**
@@ -52,21 +52,25 @@ export async function runSettlement(): Promise<SettlementResult> {
   if (!config.oddsApi.settlement.enabled) {
     return { ok: false, sportsPolled: 0, eventsCompleted: 0, signalsSettled: 0, message: "SETTLEMENT_ENABLED is off" }
   }
-  const admin = createAdminClient()
-  if (!admin || !config.oddsApi.enabled) {
-    return { ok: false, sportsPolled: 0, eventsCompleted: 0, signalsSettled: 0, message: "Supabase or Odds API not configured" }
+  const pool = getPool()
+  if (!pool || !config.oddsApi.enabled) {
+    return { ok: false, sportsPolled: 0, eventsCompleted: 0, signalsSettled: 0, message: "Database or Odds API not configured" }
   }
 
   // Which sports still have unsettled signals for games that have started?
-  const nowIso = new Date().toISOString()
-  const { data: pending, error } = await admin
-    .from("edge_signals")
-    .select("id, event_id, outcome, decimal_odds, league")
-    .is("won", null)
-    .lt("commence_time", nowIso)
-    .limit(2000)
-  if (error) return { ok: false, sportsPolled: 0, eventsCompleted: 0, signalsSettled: 0, message: error.message }
-  if (!pending || pending.length === 0) return { ok: true, sportsPolled: 0, eventsCompleted: 0, signalsSettled: 0, message: "nothing to settle" }
+  let pending: { id: string; event_id: string; outcome: string; decimal_odds: number; league: string | null }[]
+  try {
+    const result = await pool.query<{ id: string; event_id: string; outcome: string; decimal_odds: number; league: string | null }>(
+      `select id, event_id, outcome, decimal_odds, league from edge_signals
+        where won is null and commence_time < now()
+        limit 2000`,
+    )
+    pending = result.rows
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { ok: false, sportsPolled: 0, eventsCompleted: 0, signalsSettled: 0, message }
+  }
+  if (pending.length === 0) return { ok: true, sportsPolled: 0, eventsCompleted: 0, signalsSettled: 0, message: "nothing to settle" }
 
   // We stored league labels (MLB/MLS/UFC…), not sport keys, so poll the
   // configured sport list — these are the only sports we ever signal on.
@@ -106,25 +110,29 @@ export async function runSettlement(): Promise<SettlementResult> {
   let settled = 0
   const settledAt = new Date().toISOString()
   for (const sig of pending) {
-    const entry = scoreByEventId.get(providerEventId(sig.event_id as string))
+    const entry = scoreByEventId.get(providerEventId(sig.event_id))
     if (!entry) continue
     const score = toFinalScore(entry)
     if (!score) continue
 
     const result = settleH2HWager({
-      outcome: sig.outcome as string,
-      decimal: sig.decimal_odds as number,
+      outcome: sig.outcome,
+      decimal: sig.decimal_odds,
       score,
     })
     // Only write a definitive win/loss; leave push/unknown for manual review.
     if (result.won === null) continue
 
-    const { error: updErr } = await admin
-      .from("edge_signals")
-      .update({ won: result.won, settled_at: settledAt })
-      .eq("id", sig.id as number)
-      .is("won", null) // idempotency guard against concurrent/retry runs
-    if (!updErr) settled++
+    try {
+      // `won is null` is the idempotency guard against concurrent/retry runs.
+      const update = await pool.query(
+        "update edge_signals set won = $1, settled_at = $2 where id = $3 and won is null",
+        [result.won, settledAt, sig.id],
+      )
+      settled += update.rowCount ?? 0
+    } catch (error) {
+      console.error(`settlement update ${sig.id} failed:`, error instanceof Error ? error.message : error)
+    }
   }
 
   return {

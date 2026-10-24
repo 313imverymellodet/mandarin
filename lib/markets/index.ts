@@ -80,7 +80,7 @@ export async function getOpportunities(): Promise<OpportunitiesResponse> {
 
     // Enrich with historical edge movement, then record this refresh as the
     // newest history point. Both are best-effort — never break the response.
-    if (config.supabase.serviceRoleKey && opportunities.length > 0) {
+    if (config.database.enabled && opportunities.length > 0) {
       try {
         const movement = await getEdgeMovement(opportunities.map((o) => o.id))
         for (const o of opportunities) {

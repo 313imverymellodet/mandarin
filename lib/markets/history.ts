@@ -1,11 +1,11 @@
-import { createAdminClient } from "@/lib/supabase/admin"
+import { getPool, insertRows } from "@/lib/db"
 import type { OpportunityDTO } from "./types"
 
 /**
  * Odds history: a lightweight time series of each market's edge, stored in
- * Supabase. Enables line-movement columns and sparklines. All writes are
- * best-effort and never block or fail the opportunities response; if Supabase
- * isn't configured, movement simply doesn't appear.
+ * Postgres. Enables line-movement columns and sparklines. All writes are
+ * best-effort and never block or fail the opportunities response; if the
+ * database isn't configured, movement simply doesn't appear.
  */
 
 export interface Movement {
@@ -22,21 +22,19 @@ const ONE_HOUR_MS = 60 * 60 * 1000
 /** Fetch recent edge history for the given markets and derive movement. */
 export async function getEdgeMovement(ids: string[]): Promise<Map<string, Movement>> {
   const out = new Map<string, Movement>()
-  const admin = createAdminClient()
-  if (!admin || ids.length === 0) return out
+  const pool = getPool()
+  if (!pool || ids.length === 0) return out
 
   const sinceIso = new Date(Date.now() - SIX_HOURS_MS).toISOString()
-  const { data, error } = await admin
-    .from("odds_snapshots")
-    .select("opportunity_id, edge, captured_at")
-    .in("opportunity_id", ids)
-    .gte("captured_at", sinceIso)
-    .order("captured_at", { ascending: true })
-
-  if (error || !data) return out
+  const { rows } = await pool.query<{ opportunity_id: string; edge: number; captured_at: Date }>(
+    `select opportunity_id, edge, captured_at from odds_snapshots
+      where opportunity_id = any($1::text[]) and captured_at >= $2
+      order by captured_at asc`,
+    [ids, sinceIso],
+  )
 
   const series = new Map<string, { t: number; edge: number }[]>()
-  for (const row of data as { opportunity_id: string; edge: number; captured_at: string }[]) {
+  for (const row of rows) {
     const arr = series.get(row.opportunity_id) ?? []
     arr.push({ t: new Date(row.captured_at).getTime(), edge: row.edge })
     series.set(row.opportunity_id, arr)
@@ -57,8 +55,8 @@ export async function getEdgeMovement(ids: string[]): Promise<Map<string, Moveme
 
 /** Persist the current edge for each market. Fire-and-forget. */
 export function recordSnapshots(opps: OpportunityDTO[]): void {
-  const admin = createAdminClient()
-  if (!admin || opps.length === 0) return
+  const pool = getPool()
+  if (!pool || opps.length === 0) return
 
   const capturedAt = new Date().toISOString()
   const rows = opps.map((o) => ({
@@ -69,17 +67,14 @@ export function recordSnapshots(opps: OpportunityDTO[]): void {
     captured_at: capturedAt,
   }))
 
-  void admin
-    .from("odds_snapshots")
-    .insert(rows)
-    .then(({ error }) => {
-      if (error) console.error("odds_snapshots insert failed:", error.message)
-    })
+  void insertRows("odds_snapshots", ["opportunity_id", "league", "matchup", "edge", "captured_at"], rows).catch((error) =>
+    console.error("odds_snapshots insert failed:", error instanceof Error ? error.message : error),
+  )
 
   // Occasionally prune history older than 48h so the table stays small.
   if (Math.random() < 0.1) {
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
-    void admin.from("odds_snapshots").delete().lt("captured_at", cutoff).then(() => undefined)
+    void pool.query("delete from odds_snapshots where captured_at < $1", [cutoff]).catch(() => undefined)
   }
 }
 

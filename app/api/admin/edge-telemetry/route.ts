@@ -1,26 +1,42 @@
 import { NextResponse } from "next/server"
-import { getCurrentUser } from "@/lib/supabase/server"
-import { createAdminClient } from "@/lib/supabase/admin"
+import type { Pool } from "pg"
+import { getCurrentUser } from "@/lib/session"
+import { getPool } from "@/lib/db"
 import { summarizeEdgeBacktest, buildCalibrationBins, type SettledEdgeRecord } from "@/lib/markets/edge-history"
 
 /** Latest closing fair probability per (event, outcome) before commence time. */
-async function loadClosingProbs(
-  admin: NonNullable<ReturnType<typeof createAdminClient>>,
-  eventIds: string[],
-): Promise<Map<string, number>> {
+async function loadClosingProbs(pool: Pool, eventIds: string[]): Promise<Map<string, number>> {
   const closing = new Map<string, number>()
   if (eventIds.length === 0) return closing
-  const { data } = await admin
-    .from("market_fair_probs")
-    .select("event_id, outcome, observed_at, commence_time, fair_probability")
-    .in("event_id", eventIds)
-    .order("observed_at", { ascending: true })
-  for (const row of data ?? []) {
-    // Only pregame snapshots count toward the closing line.
-    if (row.commence_time && new Date(row.observed_at as string) >= new Date(row.commence_time as string)) continue
-    closing.set(`${row.event_id}::${(row.outcome as string).toLowerCase()}`, row.fair_probability as number)
+  // Only pregame snapshots count toward the closing line; ascending order so
+  // the last write per (event, outcome) is the latest pregame value.
+  const { rows } = await pool.query<{ event_id: string; outcome: string; fair_probability: number }>(
+    `select event_id, outcome, fair_probability from market_fair_probs
+      where event_id = any($1::text[])
+        and (commence_time is null or observed_at < commence_time)
+      order by observed_at asc`,
+    [eventIds],
+  )
+  for (const row of rows) {
+    closing.set(`${row.event_id}::${row.outcome.toLowerCase()}`, row.fair_probability)
   }
   return closing
+}
+
+interface SignalRow {
+  event_id: string
+  league: string | null
+  matchup: string | null
+  bookmaker: string
+  outcome: string
+  decimal_odds: number
+  fair_probability: number
+  net_ev: number | null
+  confidence: number | null
+  anchor_mode: string | null
+  observed_at: Date
+  won: boolean | null
+  settled_at: Date | null
 }
 
 export const dynamic = "force-dynamic"
@@ -35,40 +51,48 @@ export async function GET() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Sign in required." }, { status: 401 })
 
-  const admin = createAdminClient()
-  if (!admin) {
+  const pool = getPool()
+  if (!pool) {
     return NextResponse.json({ error: "Telemetry store is not configured." }, { status: 503 })
   }
 
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
-  const [signals, rejections, fairProbs] = await Promise.all([
-    admin
-      .from("edge_signals")
-      .select(
-        "event_id, league, matchup, bookmaker, outcome, decimal_odds, fair_probability, net_ev, confidence, anchor_mode, observed_at, won, settled_at",
-      )
-      .gte("observed_at", since)
-      .order("observed_at", { ascending: false })
-      .limit(1000),
-    admin.from("edge_rejections").select("reason, count").gte("observed_at", since).limit(2000),
-    admin.from("market_fair_probs").select("event_id", { count: "exact", head: true }).gte("observed_at", since),
-  ])
-
-  if (signals.error) {
+  let rows: SignalRow[]
+  let rejections: { reason: string; count: number }[]
+  let fairProbCount: number
+  try {
+    const [signals, rejectionResult, fairProbs] = await Promise.all([
+      pool.query<SignalRow>(
+        `select event_id, league, matchup, bookmaker, outcome, decimal_odds, fair_probability, net_ev,
+                confidence, anchor_mode, observed_at, won, settled_at
+           from edge_signals where observed_at >= $1
+          order by observed_at desc limit 1000`,
+        [since],
+      ),
+      pool.query<{ reason: string; count: number }>(
+        "select reason, count from edge_rejections where observed_at >= $1 limit 2000",
+        [since],
+      ),
+      pool.query<{ n: string }>("select count(*) as n from market_fair_probs where observed_at >= $1", [since]),
+    ])
+    rows = signals.rows
+    rejections = rejectionResult.rows
+    fairProbCount = Number(fairProbs.rows[0]?.n ?? 0)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json(
-      { error: `Telemetry unavailable: ${signals.error.message}. Have you run supabase/schema.sql?` },
+      { error: `Telemetry unavailable: ${message}. Have you run npm run db:migrate?` },
       { status: 503 },
     )
   }
 
-  const rows = signals.data ?? []
   const settled = rows.filter((r) => r.won !== null)
 
   // Aggregate rejection reasons — the most useful R&D signal right now.
   const reasonTotals = new Map<string, number>()
-  for (const r of rejections.data ?? []) {
-    reasonTotals.set(r.reason as string, (reasonTotals.get(r.reason as string) ?? 0) + (r.count as number))
+  for (const r of rejections) {
+    reasonTotals.set(r.reason, (reasonTotals.get(r.reason) ?? 0) + r.count)
   }
 
   // Performance: only computed from settled signals, and reported only when
@@ -81,15 +105,17 @@ export async function GET() {
   const positions = new Map<string, (typeof settled)[number]>()
   for (const r of settled) {
     if (typeof r.fair_probability !== "number" || typeof r.decimal_odds !== "number") continue
-    const key = `${r.event_id}::${(r.bookmaker as string).toLowerCase()}::${(r.outcome as string).toLowerCase()}`
+    const key = `${r.event_id}::${r.bookmaker.toLowerCase()}::${r.outcome.toLowerCase()}`
     positions.set(key, r) // last write wins → oldest row (earliest entry)
   }
-  const closing = await loadClosingProbs(admin, [...new Set([...positions.values()].map((r) => r.event_id as string))])
+  const closing = await loadClosingProbs(pool, [...new Set([...positions.values()].map((r) => r.event_id))]).catch(
+    () => new Map<string, number>(),
+  )
   const settledRecords: SettledEdgeRecord[] = [...positions.values()].map((r) => {
-    const clv = closing.get(`${r.event_id}::${(r.outcome as string).toLowerCase()}`)
+    const clv = closing.get(`${r.event_id}::${r.outcome.toLowerCase()}`)
     return {
-      fairProbability: r.fair_probability as number,
-      decimalTaken: r.decimal_odds as number,
+      fairProbability: r.fair_probability,
+      decimalTaken: r.decimal_odds,
       won: r.won as boolean,
       ...(clv !== undefined ? { closingFairProbability: clv } : {}),
     }
@@ -110,7 +136,7 @@ export async function GET() {
     collection: {
       actionableSignals: rows.length,
       settledSignals: settled.length,
-      fairProbabilitySamples: fairProbs.count ?? 0,
+      fairProbabilitySamples: fairProbCount,
       distinctEvents: new Set(rows.map((r) => r.event_id)).size,
     },
     rejectionReasons: [...reasonTotals.entries()]
