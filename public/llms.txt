@@ -1,0 +1,21 @@
+# Mandarin
+
+> Mandarin is a live sports-betting tool at https://www.betmandarin.online that compares odds across US sportsbooks and flags two-sided arbitrage and positive expected-value differences.
+
+Mandarin does not place bets. Prices come from a third-party odds provider and can change between a refresh and the moment a wager is placed. An arbitrage figure is only as good as the two prices still being available and accepted. Positive expected value is a long-run average: any single bet can lose. Nothing on the site is financial, tax, or legal advice. Whether betting is allowed depends on where the reader lives and on each sportsbook's rules.
+
+The product prefers a sharp book's price (Pinnacle, when that line is present) as an anchor, removes that book's vig to estimate a fair probability, and compares bettable US books against that estimate. When Pinnacle is absent it can fall back to a consensus of several books. Two-sided arbitrage is shown separately from one-sided positive EV. Large outliers are flagged for verification because they are often stale or unbettable.
+
+## Pages
+
+- [Home](https://www.betmandarin.online/): Product overview
+- [How it works](https://www.betmandarin.online/how-it-works): How de-vigging, arbitrage, and positive EV are calculated, with a worked example and a glossary
+- [What is arbitrage betting?](https://www.betmandarin.online/what-is-arbitrage-betting): General explanation of arbitrage betting, the stake math, and the ways a "locked" profit can fail
+- [Pricing](https://www.betmandarin.online/pricing): Plan comparison. Billing may be off during an open beta, in which case the product is free to use
+- [Sign up](https://www.betmandarin.online/sign-up): Create an account
+
+## Not for indexing
+
+- [Sign in](https://www.betmandarin.online/sign-in): Account login
+- [Dashboard](https://www.betmandarin.online/arbitrage): Live scanner. Requires a signed-in session
+- [Account](https://www.betmandarin.online/account): Profile, plan, and password. Requires a signed-in session
